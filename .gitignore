@@ -1,0 +1,61 @@
+# Private context
+private*
+
+# Lean 4
+.lake/
+build/
+lake-packages/
+lean_packages/
+lakefile.olean
+.olean
+*.olean
+*.ilean
+*.trace
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+.venv/
+venv/
+env/
+.python-version
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Data and artifacts (re-generated)
+*.sqlite
+*.db
+data/raw/
+data/processed/
+*.parquet
+*.arrow
+
+# Docker
+docker-compose.override.yml
