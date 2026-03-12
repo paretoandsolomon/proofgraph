@@ -70,6 +70,10 @@ proofgraph/
 
 ProofGraph builds on the work of the Lean community, [Mathlib](https://github.com/leanprover-community/mathlib4), and [LeanDojo](https://leandojo.org/). The theoretical foundation draws on Newman (Networks), Chung (Spectral Graph Theory), Burt (Structural Holes), Watts and Strogatz (small-world networks), and Doignon and Falmagne (Knowledge Space Theory).
 
+## Project Homepage
+
+For research publications, documentation, and project updates, visit [proofgraph.org](https://proofgraph.org).
+
 ## Contact
 
 Jonathan Llovet, jllovet@paretoandsolomon.com
