@@ -1,0 +1,14 @@
+name = "ProofGraph"
+version = "0.1.0"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_lib]]
+name = "ProofGraph"
+
+[[lean_exe]]
+name = "proofgraph-extract"
+root = "Main"
+supportInterpreter = true
