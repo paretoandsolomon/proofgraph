@@ -44,9 +44,8 @@ Heat kernel diffusion (continuous taint analysis), spectral embedding (principle
 
 ## Technology Stack
 
-- **Extraction:** Lean 4 Environment API, LeanDojo v2 methodology
-- **API server:** Go (REST + GraphQL)
-- **CLI:** Wraps REST/GraphQL APIs for human and agent interaction
+- **Extraction:** Lean 4 Environment API (adapting LeanDepViz)
+- **API + CLI:** Go (REST + GraphQL + CLI in one binary)
 - **Graph database:** Memgraph (Cypher, vector search)
 - **Analysis:** Python (NetworkX, igraph, scipy.sparse.linalg, matplotlib)
 - **Embeddings:** sentence-transformers (local)
@@ -56,9 +55,11 @@ Heat kernel diffusion (continuous taint analysis), spectral embedding (principle
 
 ```
 proofgraph/
-  ProofGraph/           # Lean 4 project (extraction, formalization)
-  proofgraph/           # Python package (analysis)
-  data/                 # Generated data artifacts (git-ignored)
+  ProofGraph/           # Lean 4 extraction (adapts LeanDepViz pattern)
+  cmd/                  # Go CLI + API server
+  internal/             # Go domain, storage, server, analysis
+  scripts/              # Python analysis bridge (scipy, matplotlib)
+  data/                 # Generated JSON artifacts (git-ignored)
   docs/                 # Documentation and schema
 ```
 

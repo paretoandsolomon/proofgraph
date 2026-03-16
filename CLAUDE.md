@@ -10,19 +10,31 @@ ProofGraph applies network science and spectral graph theory to the dependency g
 
 ```
 proofgraph/
-  ProofGraph/           # Lean 4 project (extraction, formalization)
-  proofgraph/           # Python package (analysis)
-  data/                 # Generated data artifacts (git-ignored)
-  docs/                 # Documentation and schema
+  ProofGraph/                  # Lean 4 extraction (adapts LeanDepViz pattern)
+    lakefile.lean
+    lean-toolchain
+    ProofGraph/Main.lean       # Extraction: env loading, dependency walking, JSON output
+  cmd/
+    proofgraph/main.go         # Go composition root (CLI + API in one binary)
+  internal/
+    graph/                     # Domain: Declaration, Edge, Service interface
+    storage/
+      json/                    # Load extraction JSON from disk
+      memory/                  # In-memory graph (initial backend)
+    server/                    # HTTP server (REST + GraphQL)
+    analysis/                  # Network analysis, spectral, taint
+  scripts/
+    analyze.py                 # Python bridge for scipy/matplotlib
+  data/                        # Generated JSON artifacts (git-ignored)
+  docs/                        # Documentation and schema
 ```
 
 ## Technology Stack
 
-- **Lean 4** for extraction (Environment API, LeanDojo v2 methodology)
-- **Go** API server (REST + GraphQL)
-- **CLI**: Wraps REST/GraphQL APIs for human and agent interaction
-- **Python**: NetworkX/igraph, scipy.sparse.linalg, matplotlib, sentence-transformers (analysis)
-- **Graph database**: Memgraph (Cypher queries, vector search)
+- **Lean 4** for extraction (adapting LeanDepViz pattern; Environment API)
+- **Go** API server (REST + GraphQL) and CLI in one binary (hexagonal architecture)
+- **Python**: NetworkX/igraph, scipy.sparse.linalg, matplotlib, sentence-transformers (analysis, visualization)
+- **Graph database**: Memgraph (Cypher queries, vector search; not required for prototype)
 - **Visualization**: Spectral embedding (never force-directed layout)
 
 ## Build and Development
@@ -53,7 +65,11 @@ docker compose up memgraph  # Start Memgraph instance
 
 ## Architecture
 
-The system follows a pipeline: **Extraction -> Storage -> Analysis -> API/CLI**.
+The system follows a pipeline: **Extraction (Lean) -> JSON -> Storage/Analysis (Go + Python) -> API/CLI (Go)**.
+
+**Data flow:** Lean extraction writes JSON to `data/`. The Go service reads JSON, builds an in-memory graph, and serves queries via CLI and REST/GraphQL. Python scripts handle scipy/matplotlib analysis that Go delegates to. The CLI and API server are subcommands of the same Go binary (`proofgraph serve`, `proofgraph search`, etc.).
+
+**Prototype strategy:** For initial figures and analysis, load extraction JSON directly in Python with NetworkX. Build the Go service as the long-term architecture.
 
 **Graph schema** - Nodes are `Declaration` objects with properties: name, kind, type_expr, module, slogan, embedding, pagerank, cluster_id, centrality, fiedler_component, spectral_coords, heat_kernel_signature, msc_code, ccs_code, has_docstring, proof_assistant, source_commit, proof-theoretic flags (is_constructive, is_computable, uses_choice, uses_propext, uses_quot). Edges: DEPENDS_ON, USES_DEF, EXTENDS, INSTANCE_OF, DEFINED_IN, IMPORTS.
 
@@ -86,11 +102,16 @@ Key APIs for building and extending the extraction pipeline:
 
 ## Reference Repositories
 
-- [go-server-template](https://github.com/jllovet/go-server-template): Go API server pattern
-- [linear-cli](https://github.com/jllovet/linear-cli): CLI design reference
-- [LeanDepViz](https://github.com/cameronfreer/LeanDepViz): Declaration-level extraction, filtering logic
+### Lean extraction (primary reference: LeanDepViz)
+
+- [LeanDepViz](https://github.com/cameronfreer/LeanDepViz): **Primary extraction reference.** `Main.lean` is a near-complete working prototype: loads environment via `initSearchPath` + `importModules`, iterates `env.constants.map₁`, extracts declaration kind via `ConstantInfo` pattern matching, gets dependencies via `Expr.getUsedConstants` on type and value expressions, checks axiom usage (direct), detects `sorry`, checks noncomputability, outputs DOT and JSON. ProofGraph extends this with: (1) transitive axiom collection via `Lean.collectAxioms`, (2) `is_constructive` derived field, (3) module attribution via `env.getModuleIdxFor?` with ImportGraph's `map₂` fallback.
 - [lean-graph](https://github.com/patrik-cihal/lean-graph): DependencyExtractor.lean metaprogram pattern
-- [ImportGraph](https://github.com/leanprover-community/import-graph): initSearchPath/importModules environment loading
+- [ImportGraph](https://github.com/leanprover-community/import-graph): `initSearchPath`/`importModules` environment loading; `Environment.getModuleFor?` fallback for `map₂` declarations
+
+### Go API and CLI
+
+- [go-server-template](https://github.com/jllovet/go-server-template): Hexagonal architecture template. Mapping: `todo.Todo` -> `declaration.Declaration`/`graph.Edge`; `todo.Service` -> `graph.Service` (search, features, taint); `todo.Repository` -> `graph.Repository` (JSON initially, Memgraph later); `server.Server` -> `server.Server` (REST API).
+- [linear-cli](https://github.com/jllovet/linear-cli): CLI design reference
 
 ## Style and Conventions
 
