@@ -55,14 +55,23 @@ docker compose up memgraph  # Start Memgraph instance
 
 The system follows a pipeline: **Extraction -> Storage -> Analysis -> API/CLI**.
 
-**Graph schema** - Nodes are `Declaration` objects with properties: name, kind, type_expr, module, slogan, embedding, pagerank, cluster_id, centrality, fiedler_component, spectral_coords, heat_kernel_signature, proof-theoretic flags (is_constructive, is_computable, uses_choice, uses_propext, uses_quot). Edges: DEPENDS_ON, USES_DEF, EXTENDS, INSTANCE_OF, DEFINED_IN, IMPORTS.
+**Graph schema** - Nodes are `Declaration` objects with properties: name, kind, type_expr, module, slogan, embedding, pagerank, cluster_id, centrality, fiedler_component, spectral_coords, heat_kernel_signature, msc_code, ccs_code, has_docstring, proof_assistant, source_commit, proof-theoretic flags (is_constructive, is_computable, uses_choice, uses_propext, uses_quot). Edges: DEPENDS_ON, USES_DEF, EXTENDS, INSTANCE_OF, DEFINED_IN, IMPORTS.
 
 **Proof-theoretic properties** extracted per declaration:
 1. Noncomputable status (direct flag from ConstantInfo)
 2. Transitive axiom usage (Classical.choice, propext, Quot.sound, funext)
 3. Constructive status (derived from axiom usage)
 
-**Go API server** exposes REST and GraphQL endpoints. The **CLI** wraps these APIs for human and agent use, providing commands for: search, premise retrieval, neighborhood exploration, graph features, proof properties, and proof attempt logging.
+**Go API server** exposes REST and GraphQL endpoints. The **CLI** wraps these APIs for human and agent use:
+
+```
+proofgraph search <query> [--mode structural|semantic|combined] [--limit N] [--format json|text]
+proofgraph neighborhood <declaration> [--depth N] [--edge-types deps,uses,extends]
+proofgraph features <declaration>          # centrality, PageRank, cluster, proof properties
+proofgraph taint <declaration> [--transitive]  # taint chain, classical barriers, propagation impact
+proofgraph premises <goal_state> [--context file]  # ranked premises with graph features
+proofgraph log-attempt --goal <goal> --premises-used <list> --success <bool> [--error <msg>]
+```
 
 ## Lean 4 API Reference (Extraction Development)
 

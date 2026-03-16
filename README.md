@@ -23,11 +23,13 @@ ProofGraph extracts the declaration-level dependency graph from Lean 4 projects,
 1. Network science analysis of formalized mathematical knowledge
 2. Spectral analysis: Laplacian spectrum, Fiedler decomposition, algebraic connectivity, spectral clustering, heat kernel diffusion
 3. Proof-theoretic taint analysis (binary and continuous via heat kernel)
-4. Structural analysis: communities, structural holes, core-periphery decomposition
-5. Graph-distance-aware premise ranking (with spectral features for GNN inputs)
-6. Proof mining prioritization (using graph structure to identify high-value proof targets)
-7. Ecosystem governance (structural health metrics, dependency risk analysis)
-8. Open datasets and benchmarks
+4. Proof mining prioritization (graph-theoretic identification of classical barriers with highest constructivization impact)
+5. Structural analysis: communities, structural holes, core-periphery decomposition
+6. Ecosystem governance (redundancy detection, structural balance monitoring, dependency risk analysis)
+7. "State of Mathlib" empirical reports (ecosystem health dashboard)
+8. Graph-distance-aware premise ranking (with spectral features for GNN inputs)
+9. Proof-attempt RL dataset with structural context
+10. Open dataset and benchmark on HuggingFace (graph-enriched vs. neural vs. text retrieval)
 
 ## Analysis Methods
 
@@ -62,7 +64,7 @@ proofgraph/
 
 ## Getting Started
 
-*Coming soon.* ProofGraph is under active development. See the roadmap below.
+*Coming soon.* ProofGraph is under active development.
 
 ## License
 
