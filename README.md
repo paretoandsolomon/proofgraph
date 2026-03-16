@@ -4,7 +4,7 @@
 
 ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics. Proofs are programs, propositions are types, and a formalized mathematics library like Lean's [Mathlib](https://github.com/leanprover-community/mathlib4) (250,000+ theorems, 120,000+ definitions) is a complex network whose structure can be studied empirically.
 
-ProofGraph extracts the declaration-level dependency graph from Lean 4 projects, computes proof-theoretic properties, runs structural and spectral analysis, and exposes everything through APIs and an MCP server.
+ProofGraph extracts the declaration-level dependency graph from Lean 4 projects, computes proof-theoretic properties, runs structural and spectral analysis, and exposes results through REST and GraphQL APIs, with a CLI for human and agent interaction.
 
 ## Research Questions
 
@@ -25,7 +25,9 @@ ProofGraph extracts the declaration-level dependency graph from Lean 4 projects,
 3. Proof-theoretic taint analysis (binary and continuous via heat kernel)
 4. Structural analysis: communities, structural holes, core-periphery decomposition
 5. Graph-distance-aware premise ranking (with spectral features for GNN inputs)
-6. Open datasets and benchmarks
+6. Proof mining prioritization (using graph structure to identify high-value proof targets)
+7. Ecosystem governance (structural health metrics, dependency risk analysis)
+8. Open datasets and benchmarks
 
 ## Analysis Methods
 
@@ -41,11 +43,11 @@ Heat kernel diffusion (continuous taint analysis), spectral embedding (principle
 ## Technology Stack
 
 - **Extraction:** Lean 4 Environment API, LeanDojo v2 methodology
+- **API server:** Go (REST + GraphQL)
+- **CLI:** Wraps REST/GraphQL APIs for human and agent interaction
 - **Graph database:** Memgraph (Cypher, vector search)
-- **Network analysis:** NetworkX, igraph
-- **Spectral analysis:** scipy.sparse.linalg
+- **Analysis:** Python (NetworkX, igraph, scipy.sparse.linalg, matplotlib)
 - **Embeddings:** sentence-transformers (local)
-- **API:** FastAPI (REST + GraphQL, OpenAPI 3.1)
 - **Visualization:** Spectral embedding
 
 ## Project Structure
@@ -53,7 +55,7 @@ Heat kernel diffusion (continuous taint analysis), spectral embedding (principle
 ```
 proofgraph/
   ProofGraph/           # Lean 4 project (extraction, formalization)
-  proofgraph/           # Python package (analysis, API, MCP server)
+  proofgraph/           # Python package (analysis)
   data/                 # Generated data artifacts (git-ignored)
   docs/                 # Documentation and schema
 ```

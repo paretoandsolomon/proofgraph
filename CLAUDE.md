@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics (Lean 4 / Mathlib). It extracts declaration-level dependency graphs, computes proof-theoretic properties, runs structural and spectral analysis, and exposes results through APIs and an MCP server. MIT licensed.
+ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics (Lean 4 / Mathlib). It extracts declaration-level dependency graphs, computes proof-theoretic properties, runs structural and spectral analysis, and exposes results through a Go API server (REST + GraphQL), with a CLI for human and agent interaction. MIT licensed.
 
 ## Project Structure
 
 ```
 proofgraph/
   ProofGraph/           # Lean 4 project (extraction, formalization)
-  proofgraph/           # Python package (analysis, API, MCP server)
+  proofgraph/           # Python package (analysis)
   data/                 # Generated data artifacts (git-ignored)
   docs/                 # Documentation and schema
 ```
@@ -19,7 +19,9 @@ proofgraph/
 ## Technology Stack
 
 - **Lean 4** for extraction (Environment API, LeanDojo v2 methodology)
-- **Python**: FastAPI (REST + GraphQL), NetworkX/igraph, scipy.sparse.linalg, sentence-transformers
+- **Go** API server (REST + GraphQL)
+- **CLI**: Wraps REST/GraphQL APIs for human and agent interaction
+- **Python**: NetworkX/igraph, scipy.sparse.linalg, matplotlib, sentence-transformers (analysis)
 - **Graph database**: Memgraph (Cypher queries, vector search)
 - **Visualization**: Spectral embedding (never force-directed layout)
 
@@ -43,7 +45,7 @@ pytest tests/test_foo.py   # Run a single test file
 pytest -k "test_name"      # Run a specific test
 ```
 
-### Memgraph
+### Memgraph (not required for prototype)
 
 ```bash
 docker compose up memgraph  # Start Memgraph instance
@@ -51,7 +53,7 @@ docker compose up memgraph  # Start Memgraph instance
 
 ## Architecture
 
-The system follows a pipeline: **Extraction -> Storage -> Analysis -> API/MCP**.
+The system follows a pipeline: **Extraction -> Storage -> Analysis -> API/CLI**.
 
 **Graph schema** - Nodes are `Declaration` objects with properties: name, kind, type_expr, module, slogan, embedding, pagerank, cluster_id, centrality, fiedler_component, spectral_coords, heat_kernel_signature, proof-theoretic flags (is_constructive, is_computable, uses_choice, uses_propext, uses_quot). Edges: DEPENDS_ON, USES_DEF, EXTENDS, INSTANCE_OF, DEFINED_IN, IMPORTS.
 
@@ -60,7 +62,26 @@ The system follows a pipeline: **Extraction -> Storage -> Analysis -> API/MCP**.
 2. Transitive axiom usage (Classical.choice, propext, Quot.sound, funext)
 3. Constructive status (derived from axiom usage)
 
-**MCP server** exposes: search, get_relevant_premises_for_goal, get_neighborhood, get_graph_features, get_proof_properties, log_proof_attempt.
+**Go API server** exposes REST and GraphQL endpoints. The **CLI** wraps these APIs for human and agent use, providing commands for: search, premise retrieval, neighborhood exploration, graph features, proof properties, and proof attempt logging.
+
+## Lean 4 API Reference (Extraction Development)
+
+Key APIs for building and extending the extraction pipeline:
+
+- `Environment.constants.map₁`: HashMap of all declarations in the environment
+- `ConstantInfo` variants: `defnInfo`, `thmInfo`, `axiomInfo`, `inductInfo`, `ctorInfo`, `recInfo`, `opaqueInfo`, `quotInfo`
+- `Expr.getUsedConstants`: Extract referenced constants from an expression
+- `Lean.collectAxioms`: Transitive axiom dependency collection
+- `env.getModuleIdxFor?`: Map a declaration to its source module
+- `initSearchPath` / `importModules`: Load an environment from built oleans
+
+## Reference Repositories
+
+- [go-server-template](https://github.com/jllovet/go-server-template): Go API server pattern
+- [linear-cli](https://github.com/jllovet/linear-cli): CLI design reference
+- [LeanDepViz](https://github.com/cameronfreer/LeanDepViz): Declaration-level extraction, filtering logic
+- [lean-graph](https://github.com/patrik-cihal/lean-graph): DependencyExtractor.lean metaprogram pattern
+- [ImportGraph](https://github.com/leanprover-community/import-graph): initSearchPath/importModules environment loading
 
 ## Style and Conventions
 
