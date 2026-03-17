@@ -1,5 +1,7 @@
 # Private context
 private*
+.envrc
+reference_repos/*
 
 # Lean 4
 .lake/
