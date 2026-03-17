@@ -113,6 +113,47 @@ Key APIs for building and extending the extraction pipeline:
 - [go-server-template](https://github.com/jllovet/go-server-template): Hexagonal architecture template. Mapping: `todo.Todo` -> `declaration.Declaration`/`graph.Edge`; `todo.Service` -> `graph.Service` (search, features, taint); `todo.Repository` -> `graph.Repository` (JSON initially, Memgraph later); `server.Server` -> `server.Server` (REST API).
 - [linear-cli](https://github.com/jllovet/linear-cli): CLI design reference
 
+## Linear (Project Management)
+
+Issue tracking uses [Linear](https://linear.app) via the `linear` CLI. The `LINEAR_API_TOKEN` is loaded by `direnv`; run `direnv allow` if the token is not set.
+
+The team key is **PG** (ProofGraph). Issue identifiers follow the pattern `PG-<number>`.
+
+### Common Commands
+
+```bash
+# Read
+linear issue get PG-1                          # View an issue
+linear issue list                               # List all issues
+linear issue comments PG-1                      # List comments on an issue
+linear issue children PG-1                      # List sub-issues
+linear states list --team PG                    # List workflow states and their IDs
+
+# Write
+linear issue comment PG-1 --body "comment text" # Add a comment
+linear issue update PG-1 --state-id <id>        # Change workflow state
+linear issue update PG-1 --priority 2           # Set priority (1=urgent, 2=high, 3=medium, 4=low)
+linear issue create --title "..." --description "..." # Create an issue (needs team context)
+```
+
+### Workflow States
+
+The PG team uses: Backlog, Icebox, Todo, In Progress, In Review, Done, Canceled, Duplicate.
+
+State changes require `--state-id` (a UUID), not a state name. To find IDs:
+
+```bash
+linear states list --team PG                    # Lists all states with their IDs
+linear issue update PG-1 --state-id "<uuid>"    # Update state
+```
+
+### Conventions
+
+- When starting work on a Linear issue, move it to **In Progress**.
+- Post implementation plans and status updates as comments on the issue.
+- When work is complete and verified, move to **In Review** (or **Done** if no review is needed).
+- Commit messages should reference the issue identifier (e.g., `PG-1`) in the body or title.
+
 ## Style and Conventions
 
 - **No em-dashes.** Use commas, colons, parentheses, periods, or semicolons instead. This applies to all writing, including code comments, docstrings, and documentation.
