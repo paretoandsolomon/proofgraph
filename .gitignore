@@ -54,8 +54,7 @@ Thumbs.db
 # Data and artifacts (re-generated)
 *.sqlite
 *.db
-data/raw/
-data/processed/
+data/
 *.parquet
 *.arrow
 
