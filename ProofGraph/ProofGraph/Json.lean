@@ -84,8 +84,47 @@ def buildExtractionJson
     declarations := decls.map enrichedToJson
     edges        := edges.map edgeToJson }
 
-/-- Render the ExtractionJson to a pretty-printed JSON string. -/
+/-- Render the ExtractionJson to a pretty-printed JSON string.
+
+For small extractions only; large graphs will overflow the stack.
+Use ``writeJsonStreaming`` for large outputs.
+-/
 def renderJson (extraction : ExtractionJson) : String :=
   (toJson extraction).pretty
+
+/-- Write the extraction JSON to a file handle in a streaming fashion.
+
+This avoids building the entire JSON tree in memory and prevents stack
+overflows on large graphs (50K+ declarations, 400K+ edges).
+-/
+def writeJsonStreaming (h : IO.FS.Handle) (extraction : ExtractionJson) : IO Unit := do
+  h.putStrLn "{"
+  -- metadata
+  h.putStrLn s!"  \"metadata\": {(toJson extraction.metadata).compress},"
+  -- declarations
+  h.putStrLn "  \"declarations\": ["
+  let mut firstDecl := true
+  for d in extraction.declarations do
+    if firstDecl then
+      firstDecl := false
+    else
+      h.putStr ","
+      h.putStrLn ""
+    h.putStr s!"    {(toJson d).compress}"
+  h.putStrLn ""
+  h.putStrLn "  ],"
+  -- edges
+  h.putStrLn "  \"edges\": ["
+  let mut firstEdge := true
+  for e in extraction.edges do
+    if firstEdge then
+      firstEdge := false
+    else
+      h.putStr ","
+      h.putStrLn ""
+    h.putStr s!"    {(toJson e).compress}"
+  h.putStrLn ""
+  h.putStrLn "  ]"
+  h.putStrLn "}"
 
 end ProofGraph.Json

@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
+from scipy.sparse.linalg import ArpackNoConvergence
 
 
 def graph_laplacian(G: nx.Graph, normalized: bool = False) -> scipy.sparse.csr_matrix:
@@ -54,7 +55,12 @@ def fiedler_vector(
     """
     L = graph_laplacian(G, normalized=normalized)
     # Request the 2 smallest eigenvalues; the smallest is 0 (connected graph).
-    eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(L, k=2, which="SM")
+    try:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(L, k=2, which="SM")
+    except ArpackNoConvergence:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(
+            L, k=2, sigma=0, which="LM",
+        )
 
     # eigsh returns eigenvalues in ascending order.
     algebraic_connectivity = float(eigenvalues[1])
@@ -86,6 +92,13 @@ def spectral_embedding(
     """
     L = graph_laplacian(G, normalized=normalized)
     # Request k+1 smallest eigenvalues; skip the trivial zero eigenvalue.
-    eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(L, k=k + 1, which="SM")
+    try:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(
+            L, k=k + 1, which="SM",
+        )
+    except ArpackNoConvergence:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(
+            L, k=k + 1, sigma=0, which="LM",
+        )
     # Columns 1..k are the non-trivial eigenvectors.
     return eigenvectors[:, 1 : k + 1]

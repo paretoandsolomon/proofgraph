@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
@@ -39,6 +40,7 @@ def plot_fiedler_bipartition(
     coords: np.ndarray | None = None,
     title: str | None = None,
     algebraic_connectivity: float | None = None,
+    max_edge_artists: int = 20_000,
 ) -> None:
     """Plot the Fiedler bipartition using spectral embedding coordinates.
 
@@ -61,6 +63,10 @@ def plot_fiedler_bipartition(
         Custom title. If None, uses a default describing the bipartition.
     algebraic_connectivity : float or None
         If provided, displayed in the caption.
+    max_edge_artists : int
+        When the graph has more edges than this threshold, edges are rendered
+        using a single ``LineCollection`` instead of individual matplotlib
+        artists. This avoids performance issues on large graphs. Default 20,000.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,7 +88,16 @@ def plot_fiedler_bipartition(
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
-    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.15, width=0.3, edge_color="#555e6b")
+    if G.number_of_edges() > max_edge_artists:
+        segments = [(pos[u], pos[v]) for u, v in G.edges()]
+        lc = LineCollection(
+            segments, colors="#555e6b", linewidths=0.3, alpha=0.15,
+        )
+        ax.add_collection(lc)
+    else:
+        nx.draw_networkx_edges(
+            G, pos, ax=ax, alpha=0.15, width=0.3, edge_color="#555e6b",
+        )
     nx.draw_networkx_nodes(
         G,
         pos,
