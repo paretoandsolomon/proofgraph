@@ -44,9 +44,18 @@ def main(json_path: str, output_dir: str) -> None:
     print("Computing spectral embedding (2D)...")
     coords = spectral_embedding(H, k=2)
 
+    # Derive a readable module name from the JSON filename (e.g., "nat_basic" -> title).
+    stem = Path(json_path).stem
+    title = f"Spectral Bipartition: {stem} ({H.number_of_nodes()} declarations)"
+
     output_path = output_dir / "fiedler_bipartition.png"
     print(f"Generating figure at {output_path}...")
-    plot_fiedler_bipartition(H, fiedler, output_path, coords=coords)
+    plot_fiedler_bipartition(
+        H, fiedler, output_path,
+        coords=coords,
+        title=title,
+        algebraic_connectivity=algebraic_connectivity,
+    )
     print("Done.")
 
 

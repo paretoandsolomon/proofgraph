@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile.python
     volumes:
-      - ./proofgraph:/app/proofgraph
+      - ./src:/app/src
+      - ./tests:/app/tests
       - ./scripts:/app/scripts
       - ./data:/app/data
       - ./figures:/app/figures

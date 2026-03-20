@@ -18,11 +18,13 @@ def plot_fiedler_bipartition(
     fiedler: np.ndarray,
     output_path: str | Path,
     coords: np.ndarray | None = None,
+    title: str | None = None,
+    algebraic_connectivity: float | None = None,
 ) -> None:
     """Plot the Fiedler bipartition using spectral embedding coordinates.
 
     Nodes are colored by the sign of their Fiedler vector component:
-    teal for positive, slate blue for negative. Positions come from spectral
+    teal for Cluster A, slate blue for Cluster B. Positions come from spectral
     embedding (never force-directed layout).
 
     Parameters
@@ -36,6 +38,10 @@ def plot_fiedler_bipartition(
     coords : np.ndarray or None
         Spectral embedding coordinates, shape (n_nodes, 2). If None, uses
         the Fiedler vector as x-axis and node index as y-axis.
+    title : str or None
+        Custom title. If None, uses a default describing the bipartition.
+    algebraic_connectivity : float or None
+        If provided, displayed in the caption.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +56,7 @@ def plot_fiedler_bipartition(
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
-    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.15, width=0.3, edge_color="#94a3b8")
+    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.25, width=0.4, edge_color="#555e6b")
     nx.draw_networkx_nodes(
         G,
         pos,
@@ -62,23 +68,45 @@ def plot_fiedler_bipartition(
 
     n_positive = sum(1 for v in fiedler if v >= 0)
     n_negative = len(fiedler) - n_positive
-    ax.set_title(
-        f"Fiedler Bipartition ({n_positive} / {n_negative} nodes)",
-        fontsize=14,
-        fontweight="bold",
-    )
-    ax.set_xlabel("Spectral coordinate 1", fontsize=10)
-    ax.set_ylabel("Spectral coordinate 2", fontsize=10)
+
+    if title is None:
+        title = f"Spectral Bipartition of Dependency Graph ({G.number_of_nodes()} declarations)"
+    ax.set_title(title, fontsize=14, fontweight="bold")
+
+    ax.set_xlabel("Fiedler vector (primary spectral axis)", fontsize=10)
+    ax.set_ylabel("Third Laplacian eigenvector (secondary spectral axis)", fontsize=10)
     ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+    # Caption
+    caption_lines = [
+        "Declarations positioned by the two smallest non-trivial eigenvectors of the graph Laplacian.",
+        "Color indicates the spectral bipartition: the sign of the Fiedler vector splits the graph",
+        "into two clusters that approximate the sparsest cut of the dependency structure.",
+    ]
+    if algebraic_connectivity is not None:
+        caption_lines.append(f"Algebraic connectivity: {algebraic_connectivity:.4f}")
+    caption = "\n".join(caption_lines)
+    ax.annotate(
+        caption,
+        xy=(0.5, 0),
+        xycoords="axes fraction",
+        xytext=(0, -28),
+        textcoords="offset points",
+        ha="center",
+        va="top",
+        fontsize=8,
+        color="#64748b",
+        style="italic",
+    )
 
     # Legend
     from matplotlib.lines import Line2D
 
     legend_elements = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor=TEAL,
-               markersize=8, label=f"Positive ({n_positive})"),
+               markersize=8, label=f"Cluster A ({n_positive} declarations)"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor=SLATE_BLUE,
-               markersize=8, label=f"Negative ({n_negative})"),
+               markersize=8, label=f"Cluster B ({n_negative} declarations)"),
     ]
     ax.legend(handles=legend_elements, loc="upper right", fontsize=9)
 
