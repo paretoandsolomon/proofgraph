@@ -4,38 +4,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics (Lean 4 / Mathlib). It extracts declaration-level dependency graphs, computes proof-theoretic properties, runs structural and spectral analysis, and exposes results through a Go API server (REST + GraphQL), with a CLI for human and agent interaction. MIT licensed.
+ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics (Lean 4 / Mathlib). It extracts declaration-level dependency graphs, computes proof-theoretic properties, and runs spectral analysis. Currently a Lean extraction pipeline + Python analysis package. A Go API server (REST + GraphQL) with CLI is planned. MIT licensed.
 
 ## Project Structure
 
 ```
 proofgraph/
-  ProofGraph/                  # Lean 4 extraction (adapts LeanDepViz pattern)
-    lakefile.lean
-    lean-toolchain
-    ProofGraph/Main.lean       # Extraction: env loading, dependency walking, JSON output
-  cmd/
-    proofgraph/main.go         # Go composition root (CLI + API in one binary)
-  internal/
-    graph/                     # Domain: Declaration, Edge, Service interface
-    storage/
-      json/                    # Load extraction JSON from disk
-      memory/                  # In-memory graph (initial backend)
-    server/                    # HTTP server (REST + GraphQL)
-    analysis/                  # Network analysis, spectral, taint
+  ProofGraph/                  # Lean 4 extraction pipeline
+    ProofGraph/
+      Extract.lean             # Declaration and edge extraction
+      Properties.lean          # Proof-theoretic property computation
+      Filters.lean             # Module-based filtering
+      Json.lean                # JSON serialization
+    Main.lean                  # CLI entry point
+  src/proofgraph/              # Python analysis package
+    loader.py                  # JSON to NetworkX graph
+    spectral.py                # Laplacian, Fiedler vector, spectral embedding
+    viz.py                     # Fiedler bipartition visualization
   scripts/
-    analyze.py                 # Python bridge for scipy/matplotlib
+    generate_figure.py         # Figure generation script
+    merge_extractions.py       # Multi-module extraction merger
+  tests/                       # Python test suite (54 tests)
   data/                        # Generated JSON artifacts (git-ignored)
-  docs/                        # Documentation and schema
+  figures/                     # Generated visualizations (git-ignored)
+  docs/                        # Documentation
 ```
 
 ## Technology Stack
 
+**Current:**
 - **Lean 4** for extraction (adapting LeanDepViz pattern; Environment API)
-- **Go** API server (REST + GraphQL) and CLI in one binary (hexagonal architecture)
-- **Python**: NetworkX/igraph, scipy.sparse.linalg, matplotlib, sentence-transformers (analysis, visualization)
-- **Graph database**: Memgraph (Cypher queries, vector search; not required for prototype)
+- **Python**: NetworkX, scipy.sparse.linalg, matplotlib, numpy (analysis, visualization)
+- **Docker Compose** for Python analysis environment
 - **Visualization**: Spectral embedding (never force-directed layout)
+
+**Planned:**
+- **Go** API server (REST + GraphQL) and CLI in one binary (hexagonal architecture)
+- **Graph database**: Memgraph (Cypher queries, vector search)
+- **Embeddings**: sentence-transformers (local)
 
 ## Build and Development
 
@@ -47,29 +53,29 @@ lake build           # Build the Lean project
 lake env printPaths  # Show Lean environment paths
 ```
 
-### Python
+### Python (via Docker; do not install on host)
 
 ```bash
-cd proofgraph
-pip install -e ".[dev]"    # Install in editable mode with dev dependencies
-pytest                     # Run all tests
-pytest tests/test_foo.py   # Run a single test file
-pytest -k "test_name"      # Run a specific test
+# Run tests
+docker compose run --build --rm python -m pytest tests/ -v
+
+# Generate a figure from extraction JSON
+docker compose run --build --rm python scripts/generate_figure.py data/nat_basic.json
+
+# Merge multiple extractions
+docker compose run --build --rm python scripts/merge_extractions.py \
+  data/a.json data/b.json -o data/merged.json
 ```
 
-### Memgraph (not required for prototype)
-
-```bash
-docker compose up memgraph  # Start Memgraph instance
-```
+Always use `--build` to ensure the image reflects current code.
 
 ## Architecture
 
-The system follows a pipeline: **Extraction (Lean) -> JSON -> Storage/Analysis (Go + Python) -> API/CLI (Go)**.
+The system follows a pipeline: **Extraction (Lean) -> JSON -> Analysis (Python) -> Figures**.
 
-**Data flow:** Lean extraction writes JSON to `data/`. The Go service reads JSON, builds an in-memory graph, and serves queries via CLI and REST/GraphQL. Python scripts handle scipy/matplotlib analysis that Go delegates to. The CLI and API server are subcommands of the same Go binary (`proofgraph serve`, `proofgraph search`, etc.).
+**Current data flow:** Lean extraction writes JSON to `data/`. Python loads JSON with NetworkX, computes spectral analysis (Laplacian, Fiedler vector, embedding), and generates visualization figures. Multi-module analysis uses `merge_extractions.py` to combine extraction JSONs.
 
-**Prototype strategy:** For initial figures and analysis, load extraction JSON directly in Python with NetworkX. Build the Go service as the long-term architecture.
+**Planned data flow:** A Go service will read JSON, build an in-memory graph, and serve queries via CLI and REST/GraphQL. Python handles scipy/matplotlib analysis that Go delegates to. The CLI and API server will be subcommands of the same Go binary (`proofgraph serve`, `proofgraph search`, etc.).
 
 **Graph schema** - Nodes are `Declaration` objects with properties: name, kind, type_expr, module, slogan, embedding, pagerank, cluster_id, centrality, fiedler_component, spectral_coords, heat_kernel_signature, msc_code, ccs_code, has_docstring, proof_assistant, source_commit, proof-theoretic flags (is_constructive, is_computable, uses_choice, uses_propext, uses_quot). Edges: DEPENDS_ON, USES_DEF, EXTENDS, INSTANCE_OF, DEFINED_IN, IMPORTS.
 
@@ -78,7 +84,7 @@ The system follows a pipeline: **Extraction (Lean) -> JSON -> Storage/Analysis (
 2. Transitive axiom usage (Classical.choice, propext, Quot.sound, funext)
 3. Constructive status (derived from axiom usage)
 
-**Go API server** exposes REST and GraphQL endpoints. The **CLI** wraps these APIs for human and agent use:
+**Go API server (planned)** will expose REST and GraphQL endpoints. The **CLI** will wrap these APIs for human and agent use:
 
 ```
 proofgraph search <query> [--mode structural|semantic|combined] [--limit N] [--format json|text]

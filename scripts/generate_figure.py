@@ -33,16 +33,16 @@ def main(json_path: str, output_dir: str) -> None:
         print("Error: largest connected component has fewer than 3 nodes.")
         sys.exit(1)
 
-    print("Computing Fiedler vector...")
-    fiedler, algebraic_connectivity = fiedler_vector(H)
+    print("Computing Fiedler vector (normalized Laplacian)...")
+    fiedler, algebraic_connectivity = fiedler_vector(H, normalized=True)
     print(f"  Algebraic connectivity: {algebraic_connectivity:.6f}")
 
     n_positive = sum(1 for v in fiedler if v >= 0)
     n_negative = len(fiedler) - n_positive
     print(f"  Bipartition: {n_positive} positive, {n_negative} negative")
 
-    print("Computing spectral embedding (2D)...")
-    coords = spectral_embedding(H, k=2)
+    print("Computing spectral embedding (2D, normalized Laplacian)...")
+    coords = spectral_embedding(H, k=2, normalized=True)
 
     # Derive a readable module name from the JSON filename (e.g., "nat_basic" -> title).
     stem = Path(json_path).stem

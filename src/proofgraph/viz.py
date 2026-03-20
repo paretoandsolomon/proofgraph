@@ -5,12 +5,31 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
 
 # Teal/slate blue palette per project conventions.
 TEAL = "#14b8a6"
 SLATE_BLUE = "#475569"
+
+
+def log_scale_coords(v: np.ndarray, compression: float = 1000) -> np.ndarray:
+    """Apply monotonic log scaling to spread dense spectral coordinates.
+
+    Parameters
+    ----------
+    v : np.ndarray
+        Raw spectral coordinate values.
+    compression : float
+        Controls the compression curve. Higher values spread small values more.
+
+    Returns
+    -------
+    np.ndarray
+        Log-scaled coordinates preserving sign and relative ordering.
+    """
+    return np.sign(v) * np.log1p(np.abs(v) * compression) / np.log1p(compression)
 
 
 def plot_fiedler_bipartition(
@@ -50,19 +69,26 @@ def plot_fiedler_bipartition(
     colors = [TEAL if fiedler[i] >= 0 else SLATE_BLUE for i in range(len(nodes))]
 
     if coords is not None:
-        pos = {nodes[i]: (coords[i, 0], coords[i, 1]) for i in range(len(nodes))}
+        scaled = np.column_stack(
+            [log_scale_coords(coords[:, j]) for j in range(coords.shape[1])]
+        )
+        pos = {nodes[i]: (scaled[i, 0], scaled[i, 1]) for i in range(len(nodes))}
     else:
         pos = {nodes[i]: (fiedler[i], float(i)) for i in range(len(nodes))}
 
+    # Scale node size by degree so hub structure is visible.
+    degrees = np.array([G.degree(n) for n in nodes], dtype=float)
+    node_sizes = 5 + 40 * (degrees / max(degrees.max(), 1))
+
     fig, ax = plt.subplots(figsize=(12, 8))
 
-    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.25, width=0.4, edge_color="#555e6b")
+    nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.15, width=0.3, edge_color="#555e6b")
     nx.draw_networkx_nodes(
         G,
         pos,
         ax=ax,
         node_color=colors,
-        node_size=15,
+        node_size=node_sizes,
         linewidths=0,
     )
 
@@ -98,9 +124,6 @@ def plot_fiedler_bipartition(
         color="#64748b",
         style="italic",
     )
-
-    # Legend
-    from matplotlib.lines import Line2D
 
     legend_elements = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor=TEAL,

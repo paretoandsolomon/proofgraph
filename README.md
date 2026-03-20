@@ -4,8 +4,6 @@
 
 ProofGraph applies network science and spectral graph theory to the dependency graph of formalized mathematics. Proofs are programs, propositions are types, and a formalized mathematics library like Lean's [Mathlib](https://github.com/leanprover-community/mathlib4) (250,000+ theorems, 120,000+ definitions) is a complex network whose structure can be studied empirically.
 
-ProofGraph extracts the declaration-level dependency graph from Lean 4 projects, computes proof-theoretic properties, runs structural and spectral analysis, and exposes results through REST and GraphQL APIs, with a CLI for human and agent interaction.
-
 ## Research Questions
 
 - Does Mathlib exhibit small-world properties?
@@ -18,54 +16,123 @@ ProofGraph extracts the declaration-level dependency graph from Lean 4 projects,
 
 **Working hypothesis:** Mathlib exhibits small-world properties and partial scale-free degree distribution, with community structure that partially but not fully corresponds to MSC classification. Spectral analysis will reveal a small algebraic connectivity (structural bottlenecks) and a Fiedler vector bipartition reflecting a fundamental division in mathematical practice.
 
-## What ProofGraph Provides
+## Current Capabilities
 
-1. Network science analysis of formalized mathematical knowledge
-2. Spectral analysis: Laplacian spectrum, Fiedler decomposition, algebraic connectivity, spectral clustering, heat kernel diffusion
-3. Proof-theoretic taint analysis (binary and continuous via heat kernel)
-4. Proof mining prioritization (graph-theoretic identification of classical barriers with highest constructivization impact)
-5. Structural analysis: communities, structural holes, core-periphery decomposition
-6. Ecosystem governance (redundancy detection, structural balance monitoring, dependency risk analysis)
-7. "State of Mathlib" empirical reports (ecosystem health dashboard)
-8. Graph-distance-aware premise ranking (with spectral features for GNN inputs)
-9. Proof-attempt RL dataset with structural context
-10. Open dataset and benchmark on HuggingFace (graph-enriched vs. neural vs. text retrieval)
+### Lean 4 Extraction Pipeline
 
-## Analysis Methods
+Extracts declaration-level dependency graphs from Lean 4 projects with proof-theoretic property annotation:
 
-**Phase 1: Standard Network Science.**
-Community detection (Louvain, label propagation), degree distribution analysis, PageRank, betweenness centrality, structural holes (Burt), core-periphery decomposition (Newman), temporal evolution.
+- Declaration metadata: name, kind (theorem/def/axiom/...), module, unsafe status, sorry detection
+- Dependency edges via `Expr.getUsedConstants` on type and value expressions
+- Transitive axiom collection: identifies Classical.choice, propext, Quot.sound usage
+- Constructive status derivation, noncomputability detection
+- JSON output with metadata block (module list, extraction date, declaration/edge counts)
+- Tested at scale: 7,000+ declarations across 5 Mathlib modules
 
-**Phase 2: Spectral Graph Theory.**
-Spectral clustering (Laplacian eigenvectors), Fiedler vector analysis (natural bipartition), algebraic connectivity, hierarchical spectral bisection, Cheeger inequality bounds, spectral features as GNN inputs.
+### Python Analysis Package
 
-**Phase 3: Advanced Spectral and Topology.**
-Heat kernel diffusion (continuous taint analysis), spectral embedding (principled visualization), persistent homology (TDA).
+Spectral graph theory and visualization tools:
+
+- **Graph loading**: JSON to NetworkX, largest connected component extraction, attribute preservation
+- **Spectral analysis**: Graph Laplacian (combinatorial and normalized), Fiedler vector and algebraic connectivity, k-dimensional spectral embedding
+- **Visualization**: Fiedler bipartition plots with spectral embedding layout, log-scaled coordinates for dense clusters, degree-scaled node sizes for hub visibility
+- **Multi-module merging**: Deduplicated merge of extraction JSONs across modules
+
+### Analysis Methods (implemented)
+
+- Fiedler vector bipartition (sparsest cut approximation)
+- Algebraic connectivity measurement
+- Spectral embedding (principled, non-force-directed node positioning)
+- Normalized Laplacian for degree-heterogeneous graphs
+
+## Coming Soon
+
+### Analysis Methods (planned)
+
+- Community detection (Louvain, label propagation)
+- Degree distribution analysis, PageRank, betweenness centrality
+- Structural holes (Burt), core-periphery decomposition (Newman)
+- Hierarchical spectral bisection
+- Heat kernel diffusion (continuous taint analysis)
+- Persistent homology (TDA)
+- Temporal evolution across Mathlib commits
+
+### Go API and CLI
+
+REST and GraphQL API server with CLI for human and agent interaction:
+
+- `proofgraph search`: Structural and semantic search over declarations
+- `proofgraph features`: Centrality, PageRank, cluster, proof properties per declaration
+- `proofgraph taint`: Classical/constructive taint chain analysis
+- `proofgraph premises`: Graph-distance-aware premise ranking
+
+### Additional Planned Features
+
+- Proof-theoretic taint analysis (binary and continuous via heat kernel)
+- Proof mining prioritization (graph-theoretic identification of classical barriers)
+- Ecosystem governance (redundancy detection, structural balance monitoring)
+- Graph-distance-aware premise ranking with spectral features for GNN inputs
+- Open dataset and benchmark on HuggingFace
 
 ## Technology Stack
 
-- **Extraction:** Lean 4 Environment API (adapting LeanDepViz)
-- **API + CLI:** Go (REST + GraphQL + CLI in one binary)
-- **Graph database:** Memgraph (Cypher, vector search)
-- **Analysis:** Python (NetworkX, igraph, scipy.sparse.linalg, matplotlib)
+**Current:**
+- **Extraction:** Lean 4 Environment API (adapting [LeanDepViz](https://github.com/cameronfreer/LeanDepViz))
+- **Analysis:** Python (NetworkX, scipy.sparse.linalg, matplotlib, numpy)
+- **Infrastructure:** Docker Compose for Python analysis
+
+**Planned:**
+- **API + CLI:** Go (REST + GraphQL + CLI in one binary, hexagonal architecture)
+- **Graph database:** Memgraph (Cypher queries, vector search)
 - **Embeddings:** sentence-transformers (local)
-- **Visualization:** Spectral embedding
 
 ## Project Structure
 
 ```
 proofgraph/
-  ProofGraph/           # Lean 4 extraction (adapts LeanDepViz pattern)
-  cmd/                  # Go CLI + API server
-  internal/             # Go domain, storage, server, analysis
-  scripts/              # Python analysis bridge (scipy, matplotlib)
-  data/                 # Generated JSON artifacts (git-ignored)
-  docs/                 # Documentation and schema
+  ProofGraph/               # Lean 4 extraction pipeline
+    ProofGraph/
+      Extract.lean          # Declaration and edge extraction
+      Properties.lean       # Proof-theoretic property computation
+      Filters.lean          # Module-based filtering
+      Json.lean             # JSON serialization
+    Main.lean               # CLI entry point
+  src/proofgraph/           # Python analysis package
+    loader.py               # JSON to NetworkX graph
+    spectral.py             # Laplacian, Fiedler vector, spectral embedding
+    viz.py                  # Fiedler bipartition visualization
+  scripts/
+    generate_figure.py      # Figure generation script
+    merge_extractions.py    # Multi-module extraction merger
+  tests/                    # Python test suite (54 tests)
+  data/                     # Generated JSON artifacts (git-ignored)
+  figures/                  # Generated visualizations (git-ignored)
+  docs/                     # Documentation
 ```
 
-## Getting Started
+## Quick Start
 
-*Coming soon.* ProofGraph is under active development.
+### Lean Extraction
+
+```bash
+cd ProofGraph
+lake build
+lake exe proofgraph-extract Mathlib.Data.Nat.Basic ../data/nat_basic.json
+```
+
+### Python Analysis (via Docker)
+
+```bash
+# Generate a spectral bipartition figure
+docker compose run --build --rm python scripts/generate_figure.py data/nat_basic.json
+
+# Run tests
+docker compose run --build --rm python -m pytest tests/ -v
+
+# Merge multiple extractions
+docker compose run --build --rm python scripts/merge_extractions.py \
+  data/nat_basic.json data/algebra_group_basic.json -o data/merged.json
+```
 
 ## License
 
