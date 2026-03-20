@@ -1,0 +1,11 @@
+services:
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    volumes:
+      - ./proofgraph:/app/proofgraph
+      - ./scripts:/app/scripts
+      - ./data:/app/data
+      - ./figures:/app/figures
+    working_dir: /app

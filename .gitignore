@@ -55,6 +55,7 @@ Thumbs.db
 *.sqlite
 *.db
 data/
+figures/
 *.parquet
 *.arrow
 
