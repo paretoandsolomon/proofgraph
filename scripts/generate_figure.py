@@ -1,11 +1,16 @@
 """Generate the Fiedler bipartition figure from extraction JSON.
 
 Usage:
-    python scripts/generate_figure.py <json_path> <output_dir> [--profile]
+    python scripts/generate_figure.py <json_path> <output_dir> [--streaming] [--light] [--profile]
+
+Flags:
+    --streaming  Use ijson streaming parser (low memory, three-pass).
+    --light      Drop heavy attributes (type expressions) from nodes.
+    --profile    Report peak memory usage via tracemalloc.
 
 Example:
     python scripts/generate_figure.py data/nat_basic.json figures/
-    python scripts/generate_figure.py data/large.json figures/ --profile
+    python scripts/generate_figure.py data/large.json figures/ --streaming --light --profile
 """
 
 from __future__ import annotations
@@ -14,12 +19,15 @@ import sys
 import time
 from pathlib import Path
 
-from proofgraph.loader import largest_connected_component, load_extraction
+from proofgraph.loader import LIGHT_ATTRS, largest_connected_component, load_extraction
 from proofgraph.spectral import fiedler_vector, spectral_embedding
 from proofgraph.viz import plot_fiedler_bipartition
 
 
-def main(json_path: str, output_dir: str, profile: bool = False) -> None:
+def main(
+    json_path: str, output_dir: str,
+    streaming: bool = False, light: bool = False, profile: bool = False,
+) -> None:
     if profile:
         import tracemalloc
         tracemalloc.start()
@@ -30,9 +38,20 @@ def main(json_path: str, output_dir: str, profile: bool = False) -> None:
 
     t0 = time.monotonic()
 
-    print(f"Loading extraction from {json_path}...")
+    use_streaming = streaming or None  # None lets load_extraction auto-detect
+    mode_parts = []
+    if streaming:
+        mode_parts.append("streaming")
+    if light:
+        mode_parts.append("light attrs")
+    mode_str = f" ({', '.join(mode_parts)})" if mode_parts else ""
+    print(f"Loading extraction from {json_path}{mode_str}...")
     t_start = time.monotonic()
-    G = load_extraction(json_path)
+    G = load_extraction(
+        json_path,
+        keep_attrs=LIGHT_ATTRS if light else None,
+        streaming=use_streaming,
+    )
     timings.append(("Load extraction", time.monotonic() - t_start))
     print(f"  Full graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
@@ -95,9 +114,14 @@ def main(json_path: str, output_dir: str, profile: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3 or len(sys.argv) > 4:
+    flags = {"--profile", "--streaming", "--light"}
+    positional = [a for a in sys.argv[1:] if a not in flags]
+    if len(positional) != 2:
         print(__doc__.strip())
         sys.exit(1)
-    profile_flag = "--profile" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--profile"]
-    main(args[0], args[1], profile=profile_flag)
+    main(
+        positional[0], positional[1],
+        streaming="--streaming" in sys.argv,
+        light="--light" in sys.argv,
+        profile="--profile" in sys.argv,
+    )
