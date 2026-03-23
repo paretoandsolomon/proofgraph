@@ -111,7 +111,7 @@ proofgraph/
   scripts/
     generate_figure.py      # Figure generation and analysis pipeline
     merge_extractions.py    # Multi-module extraction merger
-  tests/                    # Python test suite (125 tests)
+  tests/                    # Python test suite (140 tests)
   data/                     # Generated JSON artifacts (git-ignored)
   figures/                  # Generated visualizations (git-ignored)
   docs/                     # Documentation
@@ -163,6 +163,10 @@ docker compose run --build --rm python scripts/generate_figure.py \
   data/mathlib_full.json figures/ --checkpoint data/checkpoints \
   --recursive --max-depth 3 --connectivity-ratio 50.0
 
+# Re-render all figures from checkpoint without re-bisecting (Option C)
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --checkpoint data/checkpoints --rerender
+
 # Run tests
 docker compose run --build --rm python -m pytest tests/ -v
 
@@ -183,7 +187,8 @@ docker compose run --build --rm python scripts/merge_extractions.py \
 | `--max-depth N` | Maximum recursion depth for bisection (default 4). |
 | `--min-size N` | Minimum cluster size to continue bisecting (default 200). |
 | `--connectivity-ratio F` | Stop recursing when a subcluster's algebraic connectivity exceeds F times its parent's (default 10.0). Higher values allow deeper splitting. |
-| `--checkpoint DIR` | Save/load intermediate results (graph, spectral data) to skip expensive recomputation. Validated against source file size and modification time. |
+| `--checkpoint DIR` | Save/load intermediate results (graph, spectral data, bisection tree) to skip expensive recomputation. Validated against source file size and modification time. |
+| `--rerender` | Re-render all bisection figures from a saved checkpoint without re-running the recursive bisection. Requires `--checkpoint`. |
 
 ### Output Files
 
@@ -201,9 +206,11 @@ The pipeline produces the following in the output directory:
 
 | File | Description |
 |------|-------------|
-| `recursive_clusters.png` | Full graph colored by leaf clusters from recursive bisection. |
-| `recursive_bisection.md` | Hierarchical report with spectral connectivity profile at every split. |
-| `bisections/bisection_<label>.png` | Per-split bipartition figure with its own spectral embedding. |
+| `recursive_clusters.png` | Full graph colored by leaf clusters, with semantic labels and annotations. |
+| `recursive_bisection.md` | Hierarchical report with spectral connectivity profile, semantic labels. |
+| `bisections/bisection_<label>.png` | Per-split bipartition figure with semantic labels in title, legend, and in-situ annotations. |
+| `dendrogram.png` | Tree diagram of the recursive hierarchy with semantic labels and AC values. |
+| `dendrogram.svg` | SVG version of the dendrogram (scalable for papers). |
 
 **With `--checkpoint DIR`:**
 
@@ -212,6 +219,33 @@ The pipeline produces the following in the output directory:
 | `<DIR>/graph.pkl` | Pickled NetworkX graph (largest connected component). |
 | `<DIR>/spectral.npz` | Fiedler vector, algebraic connectivity, and 2D spectral embedding. |
 | `<DIR>/metadata.json` | Source file fingerprint for cache validation. |
+| `<DIR>/tree.pkl` | Pickled bisection tree (saved with `--recursive`; required for `--rerender`). |
+
+### Semantic Labeling
+
+Bisection figures and reports use automatically generated semantic labels
+derived from each cluster's module breakdown. For example, instead of
+"Cluster 0.0.0.1.0", a figure title reads "Bisection of Decision Procedures"
+and the legend shows "Linarith/Abel/FieldSimp (808)".
+
+The labeling algorithm examines the top modules at depth 3 of the module path,
+falling back to depth 2 if the distribution is too fragmented. Clusters larger
+than 10,000 declarations are labeled "Mathematics" with the dominant module
+family noted.
+
+**Two labeling modes:**
+
+- **Option B (default):** Labels are computed on-the-fly during recursive
+  bisection and applied immediately to each per-split figure. No second pass
+  or extra memory is required. This is the default behavior with `--recursive`.
+
+- **Option C (`--rerender`):** Loads the graph and bisection tree from a
+  checkpoint, recomputes semantic labels and spectral embeddings, and
+  re-generates all figures. Use this to iterate on visualization parameters
+  (colors, annotation style, label thresholds) without re-running the
+  expensive recursive bisection (~75 min at full Mathlib scale). The spectral
+  re-embedding adds ~12 min for the largest subgraph; smaller subgraphs
+  complete in seconds.
 
 ## License
 

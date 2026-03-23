@@ -11,9 +11,11 @@ import numpy as np
 from proofgraph.checkpoint import (
     load_graph,
     load_spectral,
+    load_tree,
     save_graph,
     save_metadata,
     save_spectral,
+    save_tree,
     validate_checkpoint,
 )
 
@@ -104,3 +106,46 @@ class TestValidateCheckpoint:
         ckpt.mkdir()
         (ckpt / "metadata.json").write_text("not json")
         assert not validate_checkpoint(source, ckpt, True)
+
+
+class TestSaveLoadTree:
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        tree = {
+            "label": "root",
+            "depth": 0,
+            "node_count": 21,
+            "edge_count": 50,
+            "algebraic_connectivity": 0.001,
+            "stopped_reason": None,
+            "elapsed_seconds": 1.5,
+            "analysis": None,
+            "children": [],
+            "semantic_label": "TestLabel",
+        }
+        save_tree(tree, tmp_path)
+        loaded = load_tree(tmp_path)
+        assert loaded is not None
+        assert loaded["label"] == "root"
+        assert loaded["semantic_label"] == "TestLabel"
+        assert loaded["node_count"] == 21
+
+    def test_load_missing_returns_none(self, tmp_path: Path) -> None:
+        assert load_tree(tmp_path) is None
+
+    def test_roundtrip_with_children(self, tmp_path: Path) -> None:
+        tree = {
+            "label": "root", "depth": 0, "node_count": 10,
+            "edge_count": 15, "algebraic_connectivity": 0.01,
+            "stopped_reason": None, "elapsed_seconds": 0.5,
+            "analysis": {0: {"count": 5, "declarations": ["a", "b"]}},
+            "children": [{
+                "label": "0", "depth": 1, "node_count": 5,
+                "edge_count": 5, "algebraic_connectivity": 0.1,
+                "stopped_reason": "max_depth", "elapsed_seconds": 0.1,
+                "analysis": None, "children": [],
+            }],
+        }
+        save_tree(tree, tmp_path)
+        loaded = load_tree(tmp_path)
+        assert len(loaded["children"]) == 1
+        assert loaded["children"][0]["label"] == "0"

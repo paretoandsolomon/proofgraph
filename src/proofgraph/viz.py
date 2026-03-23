@@ -73,6 +73,8 @@ def plot_fiedler_bipartition(
     title: str | None = None,
     algebraic_connectivity: float | None = None,
     max_edge_artists: int = 20_000,
+    cluster_labels: tuple[str, str] | None = None,
+    annotate: bool = False,
 ) -> None:
     """Plot the Fiedler bipartition using spectral embedding coordinates.
 
@@ -99,6 +101,11 @@ def plot_fiedler_bipartition(
         When the graph has more edges than this threshold, edges are rendered
         using a single ``LineCollection`` instead of individual matplotlib
         artists. This avoids performance issues on large graphs. Default 20,000.
+    cluster_labels : tuple[str, str] or None
+        Semantic labels for (positive, negative) clusters. If None, uses
+        "Cluster A" and "Cluster B".
+    annotate : bool
+        If True, add text annotations near each cluster's centroid.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,13 +179,39 @@ def plot_fiedler_bipartition(
         style="italic",
     )
 
+    pos_label = cluster_labels[0] if cluster_labels else "Cluster A"
+    neg_label = cluster_labels[1] if cluster_labels else "Cluster B"
     legend_elements = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor=TEAL,
-               markersize=8, label=f"Cluster A ({n_positive} declarations)"),
+               markersize=8, label=f"{pos_label} ({n_positive:,})"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor=SLATE_BLUE,
-               markersize=8, label=f"Cluster B ({n_negative} declarations)"),
+               markersize=8, label=f"{neg_label} ({n_negative:,})"),
     ]
     ax.legend(handles=legend_elements, loc="upper right", fontsize=9)
+
+    # In-situ annotations near each cluster's centroid.
+    if annotate and coords is not None:
+        for sign_val, label_text, count, color in [
+            (1, pos_label, n_positive, TEAL),
+            (-1, neg_label, n_negative, SLATE_BLUE),
+        ]:
+            member_indices = [
+                i for i in range(len(nodes))
+                if (fiedler[i] >= 0) == (sign_val == 1)
+            ]
+            if not member_indices:
+                continue
+            cx = np.mean([pos[nodes[i]][0] for i in member_indices])
+            cy = np.mean([pos[nodes[i]][1] for i in member_indices])
+            ax.annotate(
+                f"{label_text}\n({count:,})",
+                xy=(cx, cy), fontsize=8, fontweight="bold",
+                ha="center", va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.3", facecolor="white",
+                    edgecolor="#cccccc", alpha=0.85,
+                ),
+            )
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -193,6 +226,8 @@ def plot_cluster_map(
     title: str | None = None,
     caption: str | None = None,
     max_edge_artists: int = 20_000,
+    label_names: dict[int | str, str] | None = None,
+    annotate: bool = False,
 ) -> None:
     """Plot a graph colored by arbitrary cluster assignments.
 
@@ -216,6 +251,11 @@ def plot_cluster_map(
         Caption text below the figure.
     max_edge_artists : int
         Threshold for switching to LineCollection for edges.
+    label_names : dict or None
+        Mapping from cluster label to semantic display name for legends
+        and annotations. If None, uses the numeric label.
+    annotate : bool
+        If True, add text annotations near each cluster's centroid.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -280,15 +320,17 @@ def plot_cluster_map(
         )
 
     # Legend: show up to 16 clusters, then truncate.
+    _names = label_names or {}
     max_legend = 16
     legend_elements = []
     for lbl in unique_labels[:max_legend]:
         count = label_counts.get(lbl, 0)
+        display = _names.get(lbl, str(lbl))
         legend_elements.append(
             Line2D(
                 [0], [0], marker="o", color="w",
                 markerfacecolor=label_to_color[lbl], markersize=8,
-                label=f"{lbl} ({count:,})",
+                label=f"{display} ({count:,})",
             )
         )
     if n_clusters > max_legend:
@@ -297,6 +339,149 @@ def plot_cluster_map(
         )
     ax.legend(handles=legend_elements, loc="upper right", fontsize=8)
 
+    # In-situ annotations near each cluster's centroid.
+    if annotate and coords is not None:
+        for lbl in unique_labels:
+            member_indices = [i for i, n in enumerate(nodes) if assignments.get(n, -1) == lbl]
+            if not member_indices:
+                continue
+            cx = np.mean([pos[nodes[i]][0] for i in member_indices])
+            cy = np.mean([pos[nodes[i]][1] for i in member_indices])
+            display = _names.get(lbl, str(lbl))
+            count = label_counts.get(lbl, 0)
+            ax.annotate(
+                f"{display}\n({count:,})",
+                xy=(cx, cy), fontsize=7, fontweight="bold",
+                ha="center", va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.3", facecolor="white",
+                    edgecolor="#cccccc", alpha=0.85,
+                ),
+            )
+
     fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Dendrogram (hierarchy overview)
+# ---------------------------------------------------------------------------
+
+_LEAF_COLORS = CLUSTER_PALETTE
+_INTERNAL_COLOR = "#f0f0f0"
+_COHESIVE_COLOR = "#c8e6c9"
+
+
+def _stop_icon(reason: str | None) -> str:
+    if reason is None:
+        return "split"
+    return {
+        "connectivity_ratio": "cohesive",
+        "min_size": "small",
+        "max_depth": "depth limit",
+    }.get(reason, reason)
+
+
+def render_dendrogram(
+    tree: dict,
+    output_path: str | Path,
+    semantic_labels: dict[str, str] | None = None,
+    fmt: str = "png",
+) -> Path:
+    """Render a hierarchy dendrogram from a recursive bisection tree.
+
+    Produces a Graphviz DOT file and renders it to PNG and/or SVG.
+
+    Parameters
+    ----------
+    tree : dict
+        Output of ``recursive_bisect``.
+    output_path : str or Path
+        Base output path (without extension). The DOT source, PNG, and SVG
+        are written alongside it.
+    semantic_labels : dict[str, str] or None
+        Mapping from tree node label to semantic name.
+    fmt : str
+        Render format: "png", "svg", or "pdf".
+
+    Returns
+    -------
+    Path
+        Path to the rendered file.
+    """
+    import graphviz
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sem = semantic_labels or {}
+    dot = graphviz.Digraph(
+        "recursive_bisection",
+        format=fmt,
+        graph_attr={
+            "rankdir": "TB",
+            "nodesep": "0.4",
+            "ranksep": "0.6",
+            "bgcolor": "white",
+        },
+        node_attr={
+            "shape": "record",
+            "style": "rounded,filled",
+            "fontname": "Helvetica",
+            "fontsize": "10",
+        },
+        edge_attr={
+            "fontname": "Helvetica",
+            "fontsize": "8",
+        },
+    )
+
+    leaf_counter = [0]
+
+    def _add_node(node: dict) -> str:
+        node_id = node["label"].replace(".", "_")
+        display = sem.get(node["label"], node["label"])
+        ac_str = (
+            f"ac={node['algebraic_connectivity']:.6f}"
+            if node["algebraic_connectivity"] is not None
+            else ""
+        )
+        status = _stop_icon(node["stopped_reason"])
+        label_parts = [display, f"{node['node_count']:,} declarations"]
+        if ac_str:
+            label_parts.append(ac_str)
+        label_parts.append(status)
+        record_label = "{" + "|".join(label_parts) + "}"
+
+        # Color: leaf nodes get palette colors, cohesive nodes get green,
+        # internal nodes get gray.
+        if not node["children"]:
+            if node.get("stopped_reason") == "connectivity_ratio":
+                fill = _COHESIVE_COLOR
+            else:
+                fill = _LEAF_COLORS[leaf_counter[0] % len(_LEAF_COLORS)]
+                leaf_counter[0] += 1
+        else:
+            fill = _INTERNAL_COLOR
+
+        dot.node(node_id, label=record_label, fillcolor=fill)
+
+        for child in node.get("children", []):
+            child_id = _add_node(child)
+            if node["node_count"] > 0:
+                pct = child["node_count"] / node["node_count"]
+                dot.edge(node_id, child_id, label=f"{pct:.1%}")
+            else:
+                dot.edge(node_id, child_id)
+
+        return node_id
+
+    _add_node(tree)
+
+    rendered = dot.render(
+        filename=output_path.stem,
+        directory=str(output_path.parent),
+        cleanup=False,
+    )
+    return Path(rendered)

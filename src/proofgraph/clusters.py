@@ -13,6 +13,181 @@ from proofgraph.spectral import fiedler_vector, spectral_embedding
 from proofgraph.viz import plot_cluster_map, plot_fiedler_bipartition
 
 
+# ---------------------------------------------------------------------------
+# Semantic auto-labeling
+# ---------------------------------------------------------------------------
+
+
+def _short_module_name(module: str | int) -> str:
+    """Extract the last meaningful component of a dotted module path.
+
+    ``Mathlib.Tactic.Linarith`` -> ``Linarith``
+    ``Tactic.NormNum`` -> ``NormNum``
+    """
+    module = str(module)
+    parts = module.split(".")
+    return parts[-1] if parts else module
+
+
+def auto_label(
+    cluster_data: dict,
+    primary_depth: int = 3,
+    fallback_depth: int = 2,
+    dominant_threshold: float = 0.40,
+    pair_threshold: float = 0.50,
+    triple_threshold: float = 0.50,
+    large_cluster_threshold: int = 10_000,
+) -> str:
+    """Generate a human-readable label for a cluster from its module breakdown.
+
+    Rules (applied in order):
+    1. If the cluster is very large (>10K declarations), label as
+       "Mathematics" with a note about the dominant module family.
+    2. At depth ``primary_depth``: if the top module accounts for
+       >= ``dominant_threshold`` of the cluster, use its short name.
+    3. If no single module dominates but the top two together
+       >= ``pair_threshold``, join them with "/".
+    4. If the top three together >= ``triple_threshold``, join all three.
+    5. Fall back to ``fallback_depth`` and repeat rules 2-4.
+    6. If nothing works, use the top module at depth 2.
+
+    Parameters
+    ----------
+    cluster_data : dict
+        A single cluster result from :func:`analyze_clusters`, containing
+        ``count`` and ``module_counts`` keyed by depth.
+    primary_depth : int
+        Preferred module path depth for labeling.
+    fallback_depth : int
+        Fallback depth if primary is too fragmented.
+    dominant_threshold : float
+        Fraction threshold for a single dominant module.
+    pair_threshold : float
+        Fraction threshold for the top two modules combined.
+    triple_threshold : float
+        Fraction threshold for the top three modules combined.
+    large_cluster_threshold : int
+        Clusters larger than this are labeled as "Mathematics".
+
+    Returns
+    -------
+    str
+        A short, human-readable label.
+    """
+    count = cluster_data.get("count", 0)
+    if count == 0:
+        return "Empty"
+
+    # Rule 1: very large clusters are the mathematical body.
+    if count >= large_cluster_threshold:
+        depth2 = cluster_data.get("module_counts", {}).get(fallback_depth, [])
+        if depth2:
+            top_mod = _short_module_name(depth2[0][0])
+            return f"Mathematics ({top_mod} dominant)"
+        return "Mathematics"
+
+    # Try labeling at each depth.
+    for depth in (primary_depth, fallback_depth):
+        entries = cluster_data.get("module_counts", {}).get(depth, [])
+        if not entries:
+            continue
+
+        fractions = [(name, c / count) for name, c in entries]
+
+        # Rule 2: single dominant module.
+        if fractions[0][1] >= dominant_threshold:
+            return _short_module_name(fractions[0][0])
+
+        # Rule 3: top two combined.
+        if len(fractions) >= 2:
+            top2_frac = fractions[0][1] + fractions[1][1]
+            if top2_frac >= pair_threshold:
+                return "/".join(
+                    _short_module_name(fractions[i][0]) for i in range(2)
+                )
+
+        # Rule 4: top three combined.
+        if len(fractions) >= 3:
+            top3_frac = sum(fractions[i][1] for i in range(3))
+            if top3_frac >= triple_threshold:
+                return "/".join(
+                    _short_module_name(fractions[i][0]) for i in range(3)
+                )
+
+    # Rule 6: fallback to top module at depth 2.
+    depth2 = cluster_data.get("module_counts", {}).get(fallback_depth, [])
+    if depth2:
+        return _short_module_name(depth2[0][0])
+
+    return "Unknown"
+
+
+def label_tree(tree: dict) -> dict[str, str]:
+    """Assign semantic labels to every node in a bisection tree.
+
+    For internal nodes that were split, the label comes from the full
+    set of declarations at that level (derived from the union of child
+    analyses). For leaf nodes, the label comes from the parent's
+    analysis of that child.
+
+    Parameters
+    ----------
+    tree : dict
+        Output of :func:`recursive_bisect`.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from tree node label (e.g., "root", "0", "0.1") to
+        semantic label (e.g., "Tactics", "Linarith/Abel/FieldSimp").
+    """
+    labels: dict[str, str] = {}
+    _label_tree_recursive(tree, labels)
+    return labels
+
+
+def _label_tree_recursive(node: dict, labels: dict[str, str]) -> None:
+    """Walk the tree assigning semantic labels.
+
+    Prefers labels stored in the tree by recursive_bisect (Option B).
+    Falls back to computing from analysis data if not present.
+    """
+    # Use pre-computed label if available (Option B stored these).
+    if "semantic_label" in node:
+        labels[node["label"]] = node["semantic_label"]
+    elif node["analysis"]:
+        # Fallback: compute from analysis data.
+        total_count = sum(c["count"] for c in node["analysis"].values())
+        all_decls = []
+        for cl_data in node["analysis"].values():
+            all_decls.extend(cl_data["declarations"])
+        module_counts: dict[int, list[tuple[str, int]]] = {}
+        for depth in (2, 3):
+            counter = Counter(
+                _module_prefix(str(d), depth) for d in all_decls
+            )
+            module_counts[depth] = counter.most_common(20)
+        labels[node["label"]] = auto_label({
+            "count": total_count, "module_counts": module_counts,
+        })
+
+    # Label each child: prefer stored labels, fall back to analysis.
+    child_sem = node.get("child_semantic_labels", {})
+    if node["analysis"]:
+        for cl_int, cl_data in node["analysis"].items():
+            child_label_str = (
+                f"{node['label']}.{cl_int}" if node["label"] != "root" else str(cl_int)
+            )
+            if cl_int in child_sem:
+                labels[child_label_str] = child_sem[cl_int]
+            else:
+                labels[child_label_str] = auto_label(cl_data)
+
+    # Recurse into children.
+    for child in node.get("children", []):
+        _label_tree_recursive(child, labels)
+
+
 def assign_clusters(
     G: nx.Graph, fiedler: np.ndarray,
 ) -> dict[str, int]:
@@ -433,6 +608,27 @@ def recursive_bisect(
         + f" (ac={ac:.6f})"
     )
 
+    # Compute semantic labels for this split (Option B: on-the-fly).
+    # Parent label: derived from the union of all declarations at this level.
+    all_decls_for_parent = []
+    for cl_data in analysis.values():
+        all_decls_for_parent.extend(cl_data["declarations"])
+    parent_module_counts: dict[int, list[tuple[str, int]]] = {}
+    for d in module_depths:
+        counter = Counter(_module_prefix(str(decl), d) for decl in all_decls_for_parent)
+        parent_module_counts[d] = counter.most_common(top_n)
+    parent_sem = auto_label({
+        "count": node_count, "module_counts": parent_module_counts,
+    })
+    # Child labels.
+    child_sem_labels: dict[int, str] = {}
+    for cl_int, cl_data in analysis.items():
+        child_sem_labels[cl_int] = auto_label(cl_data)
+
+    # Store semantic labels in the result for downstream use.
+    result["semantic_label"] = parent_sem
+    result["child_semantic_labels"] = child_sem_labels
+
     # Generate bipartition figure for this split.
     if plot_dir is not None:
         _plot_dir = Path(plot_dir)
@@ -448,14 +644,20 @@ def recursive_bisect(
         else:
             coords = None
 
+        # Use semantic labels in the figure.
+        sorted_cls = sorted(cluster_nodes.keys())
+        pos_label = child_sem_labels.get(sorted_cls[0], str(sorted_cls[0])) if sorted_cls else "A"
+        neg_label = child_sem_labels.get(sorted_cls[1], str(sorted_cls[1])) if len(sorted_cls) > 1 else "B"
         fig_title = (
-            f"Bisection: {label} ({node_count:,} declarations, ac={ac:.6f})"
+            f"Bisection of {parent_sem} ({node_count:,} declarations, ac={ac:.6f})"
         )
         plot_fiedler_bipartition(
             G, fiedler_vec, fig_path,
             coords=coords,
             title=fig_title,
             algebraic_connectivity=ac,
+            cluster_labels=(pos_label, neg_label),
+            annotate=True,
         )
         print(f"  {'  ' * depth}[{label}] Figure: {fig_path}")
 
@@ -567,7 +769,11 @@ def _assign_from_node(node: dict, assignments: dict[str, str]) -> None:
                 assignments[str(decl)] = child_label
 
 
-def format_recursive_markdown(tree: dict, module_depths: tuple[int, ...] = (2, 3)) -> str:
+def format_recursive_markdown(
+    tree: dict,
+    module_depths: tuple[int, ...] = (2, 3),
+    semantic_labels: dict[str, str] | None = None,
+) -> str:
     """Format a recursive bisection tree as a Markdown report.
 
     Parameters
@@ -576,12 +782,17 @@ def format_recursive_markdown(tree: dict, module_depths: tuple[int, ...] = (2, 3
         Output of :func:`recursive_bisect`.
     module_depths : tuple[int, ...]
         Module depths included in the analysis.
+    semantic_labels : dict[str, str] or None
+        Mapping from tree node label to semantic label (from :func:`label_tree`).
 
     Returns
     -------
     str
         Markdown-formatted hierarchical report.
     """
+    if semantic_labels is None:
+        semantic_labels = {}
+
     lines: list[str] = []
     lines.append("# Recursive Spectral Bisection")
     lines.append("")
@@ -590,26 +801,33 @@ def format_recursive_markdown(tree: dict, module_depths: tuple[int, ...] = (2, 3
     profile = collect_connectivity_profile(tree)
     lines.append("## Spectral Connectivity Profile")
     lines.append("")
-    lines.append("| Label | Depth | Nodes | Algebraic Connectivity | Status |")
-    lines.append("|-------|-------|-------|----------------------|--------|")
+    lines.append("| Label | Path | Depth | Nodes | Algebraic Connectivity | Status |")
+    lines.append("|-------|------|-------|-------|----------------------|--------|")
     for r in profile:
         ac_str = f"{r['algebraic_connectivity']:.6f}" if r["algebraic_connectivity"] is not None else "n/a"
         status = r["stopped_reason"] or "split"
-        lines.append(f"| {r['label']} | {r['depth']} | {r['node_count']:,} | {ac_str} | {status} |")
+        sem = semantic_labels.get(r["label"], r["label"])
+        lines.append(
+            f"| {sem} | {r['label']} | {r['depth']} | {r['node_count']:,} | {ac_str} | {status} |"
+        )
     lines.append("")
 
     # Per-node detail.
-    _format_tree_node(tree, lines, module_depths)
+    _format_tree_node(tree, lines, module_depths, semantic_labels)
 
     return "\n".join(lines)
 
 
 def _format_tree_node(
-    node: dict, lines: list[str], module_depths: tuple[int, ...],
+    node: dict,
+    lines: list[str],
+    module_depths: tuple[int, ...],
+    semantic_labels: dict[str, str],
 ) -> None:
-    heading_depth = min(node["depth"] + 2, 6)  # ## for root, ### for depth 1, etc.
+    heading_depth = min(node["depth"] + 2, 6)
     prefix = "#" * heading_depth
-    lines.append(f"{prefix} {node['label']}")
+    sem = semantic_labels.get(node["label"], node["label"])
+    lines.append(f"{prefix} {sem} ({node['label']}, {node['node_count']:,} nodes)")
     lines.append("")
     ac_str = f"{node['algebraic_connectivity']:.6f}" if node["algebraic_connectivity"] is not None else "n/a"
     lines.append(f"**{node['node_count']:,} nodes**, {node['edge_count']:,} edges")
@@ -621,11 +839,17 @@ def _format_tree_node(
     lines.append(f"Time: {node['elapsed_seconds']:.1f}s")
     lines.append("")
 
-    # Show analysis if this node was split (has cluster analysis).
     if node["analysis"]:
         for cl_label in sorted(node["analysis"]):
             r = node["analysis"][cl_label]
-            lines.append(f"**Child {cl_label}**: {r['count']:,} declarations ({r['fraction']:.1%})")
+            child_path = (
+                f"{node['label']}.{cl_label}" if node["label"] != "root" else str(cl_label)
+            )
+            child_sem = semantic_labels.get(child_path, str(cl_label))
+            lines.append(
+                f"**{child_sem}** (cluster {child_path}): "
+                f"{r['count']:,} declarations ({r['fraction']:.1%})"
+            )
             lines.append("")
             if r["kind_counts"]:
                 lines.append("| Kind | Count | % |")
@@ -650,13 +874,14 @@ def _format_tree_node(
                 lines.append("")
 
     for child in node.get("children", []):
-        _format_tree_node(child, lines, module_depths)
+        _format_tree_node(child, lines, module_depths, semantic_labels)
 
 
 def write_recursive_outputs(
     tree: dict,
     output_dir: str | Path,
     module_depths: tuple[int, ...] = (2, 3),
+    semantic_labels: dict[str, str] | None = None,
 ) -> Path:
     """Write recursive bisection outputs to disk.
 
@@ -672,6 +897,8 @@ def write_recursive_outputs(
         Directory for output files.
     module_depths : tuple[int, ...]
         Module depths included in the analysis.
+    semantic_labels : dict[str, str] or None
+        Mapping from tree node label to semantic label.
 
     Returns
     -------
@@ -681,7 +908,9 @@ def write_recursive_outputs(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    md = format_recursive_markdown(tree, module_depths=module_depths)
+    md = format_recursive_markdown(
+        tree, module_depths=module_depths, semantic_labels=semantic_labels,
+    )
     md_path = output_dir / "recursive_bisection.md"
     md_path.write_text(md)
 
@@ -712,3 +941,105 @@ def _write_declaration_files(node: dict, output_dir: Path) -> None:
             )
     for child in node.get("children", []):
         _write_declaration_files(child, output_dir)
+
+
+# ---------------------------------------------------------------------------
+# Option C: Post-hoc re-rendering of bisection figures
+# ---------------------------------------------------------------------------
+
+
+def rerender_bisection_figures(
+    tree: dict,
+    G: nx.Graph,
+    plot_dir: str | Path,
+    semantic_labels: dict[str, str] | None = None,
+    normalized: bool = True,
+) -> None:
+    """Re-render all bisection figures from a saved tree and graph.
+
+    Walks the bisection tree, extracts each subgraph from ``G``,
+    recomputes spectral embeddings, and generates labeled figures.
+    Use this (Option C) to re-render figures with different label
+    parameters without re-running the full recursive bisection.
+
+    Requires the graph checkpoint (``G``) and the saved bisection
+    tree. Does not recompute the bisection itself.
+
+    Parameters
+    ----------
+    tree : dict
+        Output of :func:`recursive_bisect` (loaded from checkpoint).
+    G : nx.Graph
+        The largest connected component graph (loaded from checkpoint).
+    plot_dir : str or Path
+        Directory for output figures.
+    semantic_labels : dict[str, str] or None
+        Mapping from tree node label to semantic name. If None,
+        computes labels from the tree via :func:`label_tree`.
+    normalized : bool
+        Whether to use the normalized Laplacian for embeddings.
+    """
+    if semantic_labels is None:
+        semantic_labels = label_tree(tree)
+
+    plot_dir = Path(plot_dir)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    _rerender_node(tree, G, plot_dir, semantic_labels, normalized)
+
+
+def _rerender_node(
+    node: dict,
+    G: nx.Graph,
+    plot_dir: Path,
+    semantic_labels: dict[str, str],
+    normalized: bool,
+) -> None:
+    """Recursively re-render figures for a single tree node."""
+    if not node["analysis"]:
+        return  # Leaf: nothing to plot.
+
+    # Collect all declarations at this node.
+    all_members = []
+    for cl_data in node["analysis"].values():
+        all_members.extend(cl_data["declarations"])
+
+    # Extract subgraph.
+    sub = G.subgraph([m for m in all_members if m in G]).copy()
+    if sub.number_of_nodes() < 3:
+        return
+
+    # Compute Fiedler and embedding for this subgraph.
+    print(f"  [rerender] {node['label']}: computing spectral data ({sub.number_of_nodes():,} nodes)...")
+    fiedler_vec, ac = fiedler_vector(sub, normalized=normalized)
+    coords = spectral_embedding(sub, k=2, normalized=normalized)
+
+    # Build cluster labels.
+    parent_sem = semantic_labels.get(node["label"], node["label"])
+    sorted_cls = sorted(node["analysis"].keys())
+    child_paths = []
+    for cl_int in sorted_cls:
+        child_paths.append(
+            f"{node['label']}.{cl_int}" if node["label"] != "root" else str(cl_int)
+        )
+    pos_label = semantic_labels.get(child_paths[0], str(sorted_cls[0])) if child_paths else "A"
+    neg_label = semantic_labels.get(child_paths[1], str(sorted_cls[1])) if len(child_paths) > 1 else "B"
+
+    safe_label = node["label"].replace(".", "_")
+    fig_path = plot_dir / f"bisection_{safe_label}.png"
+    fig_title = f"Bisection of {parent_sem} ({sub.number_of_nodes():,} declarations, ac={ac:.6f})"
+
+    plot_fiedler_bipartition(
+        sub, fiedler_vec, fig_path,
+        coords=coords,
+        title=fig_title,
+        algebraic_connectivity=ac,
+        cluster_labels=(pos_label, neg_label),
+        annotate=True,
+    )
+    print(f"  [rerender] {node['label']}: {fig_path}")
+    del sub
+
+    # Recurse.
+    for child in node.get("children", []):
+        _rerender_node(child, G, plot_dir, semantic_labels, normalized)

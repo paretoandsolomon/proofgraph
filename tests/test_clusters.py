@@ -11,12 +11,15 @@ import pytest
 from proofgraph.clusters import (
     analyze_clusters,
     assign_clusters,
+    auto_label,
     collect_connectivity_profile,
     collect_leaf_assignments,
     format_cluster_markdown,
     format_recursive_markdown,
+    label_tree,
     print_cluster_summary,
     recursive_bisect,
+    rerender_bisection_figures,
     write_cluster_outputs,
     write_recursive_outputs,
 )
@@ -465,4 +468,95 @@ class TestCollectLeafAssignments:
     def test_generates_per_split_figures(self, tmp_path: Path) -> None:
         G = _barbell_graph()
         tree = recursive_bisect(G, max_depth=1, min_size=3, plot_dir=tmp_path)
+        assert (tmp_path / "bisection_root.png").exists()
+
+
+class TestAutoLabel:
+    def _cluster(self, count, module_counts_depth3, module_counts_depth2=None):
+        mc = {3: [(m, c) for m, c in module_counts_depth3]}
+        if module_counts_depth2:
+            mc[2] = [(m, c) for m, c in module_counts_depth2]
+        return {"count": count, "module_counts": mc}
+
+    def test_single_dominant_module(self) -> None:
+        data = self._cluster(100, [("Mathlib.Tactic.Linarith", 60)])
+        assert auto_label(data) == "Linarith"
+
+    def test_top_two_modules(self) -> None:
+        data = self._cluster(100, [
+            ("Mathlib.Tactic.Ring", 30),
+            ("Mathlib.Meta.NormNum", 25),
+        ])
+        assert auto_label(data) == "Ring/NormNum"
+
+    def test_top_three_modules(self) -> None:
+        data = self._cluster(100, [
+            ("Mathlib.Tactic.Ring", 20),
+            ("Mathlib.Meta.NormNum", 18),
+            ("Mathlib.Meta.Positivity", 15),
+        ])
+        assert auto_label(data) == "Ring/NormNum/Positivity"
+
+    def test_fallback_to_depth_2(self) -> None:
+        # All depth-3 modules are tiny (< thresholds).
+        data = self._cluster(
+            100,
+            [("Mathlib.Tactic.A", 5), ("Mathlib.Tactic.B", 5)],
+            module_counts_depth2=[("Mathlib.Tactic", 80)],
+        )
+        assert auto_label(data) == "Tactic"
+
+    def test_large_cluster_labeled_mathematics(self) -> None:
+        data = self._cluster(
+            50000,
+            [("CategoryTheory.Limits.Types", 500)],
+            module_counts_depth2=[("CategoryTheory.Limits", 8000)],
+        )
+        label = auto_label(data)
+        assert "Mathematics" in label
+
+    def test_empty_cluster(self) -> None:
+        assert auto_label({"count": 0, "module_counts": {}}) == "Empty"
+
+    def test_no_module_data(self) -> None:
+        assert auto_label({"count": 10, "module_counts": {}}) == "Unknown"
+
+
+class TestLabelTree:
+    def test_labels_all_nodes(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        labels = label_tree(tree)
+        assert "root" in labels
+        assert "0" in labels
+        assert "1" in labels
+
+    def test_labels_are_strings(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        labels = label_tree(tree)
+        for v in labels.values():
+            assert isinstance(v, str)
+
+    def test_stored_labels_used(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        # The tree should have semantic_label stored by Option B.
+        assert "semantic_label" in tree
+        labels = label_tree(tree)
+        assert labels["root"] == tree["semantic_label"]
+
+
+class TestRerenderBisectionFigures:
+    def test_creates_figures(self, tmp_path: Path) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        labels = label_tree(tree)
+        rerender_bisection_figures(tree, G, tmp_path, semantic_labels=labels)
+        assert (tmp_path / "bisection_root.png").exists()
+
+    def test_computes_labels_if_none(self, tmp_path: Path) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        rerender_bisection_figures(tree, G, tmp_path, semantic_labels=None)
         assert (tmp_path / "bisection_root.png").exists()

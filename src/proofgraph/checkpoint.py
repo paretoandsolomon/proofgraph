@@ -139,3 +139,30 @@ def validate_checkpoint(
         return True
     except (json.JSONDecodeError, KeyError):
         return False
+
+
+def save_tree(tree: dict, checkpoint_dir: str | Path) -> None:
+    """Save a recursive bisection tree to the checkpoint directory.
+
+    The tree is serialized as a pickle (it contains numpy arrays in the
+    analysis data that are not JSON-serializable without conversion).
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    with open(checkpoint_dir / "tree.pkl", "wb") as f:
+        pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print("  Saved bisection tree checkpoint")
+
+
+def load_tree(checkpoint_dir: str | Path) -> dict | None:
+    """Load a recursive bisection tree from the checkpoint directory.
+
+    Returns None if no tree checkpoint exists.
+    """
+    tree_path = Path(checkpoint_dir) / "tree.pkl"
+    if not tree_path.exists():
+        return None
+    with open(tree_path, "rb") as f:
+        tree = pickle.load(f)
+    print(f"  Loaded bisection tree checkpoint (label={tree.get('label', '?')})")
+    return tree
