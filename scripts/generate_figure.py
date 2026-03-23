@@ -14,6 +14,8 @@ Flags:
     --connectivity-ratio F  Stop recursing when a subcluster's algebraic
                      connectivity exceeds F times its parent's (default 10.0).
                      Higher values allow deeper splitting into well-connected regions.
+    --checkpoint DIR Save/load intermediate results (graph, spectral data) to
+                     skip expensive recomputation on subsequent runs.
 
 Example:
     python scripts/generate_figure.py data/nat_basic.json figures/
@@ -27,6 +29,14 @@ import sys
 import time
 from pathlib import Path
 
+from proofgraph.checkpoint import (
+    load_graph,
+    load_spectral,
+    save_graph,
+    save_metadata,
+    save_spectral,
+    validate_checkpoint,
+)
 from proofgraph.clusters import (
     analyze_clusters,
     assign_clusters,
@@ -49,6 +59,7 @@ def main(
     top_n: int = 20,
     recursive: bool = False, max_depth: int = 4, min_size: int = 200,
     connectivity_ratio: float = 10.0,
+    checkpoint: str | None = None,
 ) -> None:
     if profile:
         import tracemalloc
@@ -60,47 +71,82 @@ def main(
 
     t0 = time.monotonic()
 
-    use_streaming = streaming or None  # None lets load_extraction auto-detect
-    mode_parts = []
-    if streaming:
-        mode_parts.append("streaming")
-    if light:
-        mode_parts.append("light attrs")
-    mode_str = f" ({', '.join(mode_parts)})" if mode_parts else ""
-    print(f"Loading extraction from {json_path}{mode_str}...")
-    t_start = time.monotonic()
-    G = load_extraction(
-        json_path,
-        keep_attrs=LIGHT_ATTRS if light else None,
-        streaming=use_streaming,
+    # --- Load graph (from checkpoint or source JSON) ---
+    use_checkpoint = checkpoint is not None
+    checkpoint_valid = (
+        use_checkpoint and validate_checkpoint(json_path, checkpoint, light)
     )
-    timings.append(("Load extraction", time.monotonic() - t_start))
-    print(f"  Full graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
-    print("Extracting largest connected component...")
-    t_start = time.monotonic()
-    H = largest_connected_component(G)
-    timings.append(("Largest component", time.monotonic() - t_start))
+    H = None
+    if checkpoint_valid:
+        print(f"Loading graph from checkpoint {checkpoint}...")
+        t_start = time.monotonic()
+        H = load_graph(checkpoint)
+        if H is not None:
+            timings.append(("Load graph (checkpoint)", time.monotonic() - t_start))
+
+    if H is None:
+        use_streaming = streaming or None
+        mode_parts = []
+        if streaming:
+            mode_parts.append("streaming")
+        if light:
+            mode_parts.append("light attrs")
+        mode_str = f" ({', '.join(mode_parts)})" if mode_parts else ""
+        print(f"Loading extraction from {json_path}{mode_str}...")
+        t_start = time.monotonic()
+        G = load_extraction(
+            json_path,
+            keep_attrs=LIGHT_ATTRS if light else None,
+            streaming=use_streaming,
+        )
+        timings.append(("Load extraction", time.monotonic() - t_start))
+        print(f"  Full graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+
+        print("Extracting largest connected component...")
+        t_start = time.monotonic()
+        H = largest_connected_component(G)
+        timings.append(("Largest component", time.monotonic() - t_start))
+        del G  # Free the full digraph before saving checkpoint.
+
+        if use_checkpoint:
+            save_graph(H, checkpoint)
+            save_metadata(json_path, checkpoint, H.number_of_nodes(), H.number_of_edges(), light)
+
     print(f"  Largest component: {H.number_of_nodes()} nodes, {H.number_of_edges()} edges")
 
     if H.number_of_nodes() < 3:
         print("Error: largest connected component has fewer than 3 nodes.")
         sys.exit(1)
 
-    print("Computing Fiedler vector (normalized Laplacian)...")
-    t_start = time.monotonic()
-    fiedler, algebraic_connectivity = fiedler_vector(H, normalized=True)
-    timings.append(("Fiedler vector", time.monotonic() - t_start))
-    print(f"  Algebraic connectivity: {algebraic_connectivity:.6f}")
+    # --- Spectral computation (from checkpoint or fresh) ---
+    fiedler = None
+    if checkpoint_valid:
+        print(f"Loading spectral results from checkpoint {checkpoint}...")
+        t_start = time.monotonic()
+        spectral_data = load_spectral(checkpoint)
+        if spectral_data is not None:
+            fiedler, algebraic_connectivity, coords = spectral_data
+            timings.append(("Load spectral (checkpoint)", time.monotonic() - t_start))
 
+    if fiedler is None:
+        print("Computing Fiedler vector (normalized Laplacian)...")
+        t_start = time.monotonic()
+        fiedler, algebraic_connectivity = fiedler_vector(H, normalized=True)
+        timings.append(("Fiedler vector", time.monotonic() - t_start))
+
+        print("Computing spectral embedding (2D, normalized Laplacian)...")
+        t_start = time.monotonic()
+        coords = spectral_embedding(H, k=2, normalized=True)
+        timings.append(("Spectral embedding", time.monotonic() - t_start))
+
+        if use_checkpoint:
+            save_spectral(fiedler, algebraic_connectivity, coords, checkpoint)
+
+    print(f"  Algebraic connectivity: {algebraic_connectivity:.6f}")
     n_positive = sum(1 for v in fiedler if v >= 0)
     n_negative = len(fiedler) - n_positive
     print(f"  Bipartition: {n_positive} positive, {n_negative} negative")
-
-    print("Computing spectral embedding (2D, normalized Laplacian)...")
-    t_start = time.monotonic()
-    coords = spectral_embedding(H, k=2, normalized=True)
-    timings.append(("Spectral embedding", time.monotonic() - t_start))
 
     # Derive a readable module name from the JSON filename (e.g., "nat_basic" -> title).
     stem = Path(json_path).stem
@@ -231,6 +277,15 @@ if __name__ == "__main__":
     argv, max_depth = _parse_flag(argv, "--max-depth", 4, int)
     argv, min_size = _parse_flag(argv, "--min-size", 200, int)
     argv, connectivity_ratio = _parse_flag(argv, "--connectivity-ratio", 10.0, float)
+    # Parse --checkpoint (string flag, not numeric).
+    checkpoint = None
+    if "--checkpoint" in argv:
+        idx = argv.index("--checkpoint")
+        if idx + 1 >= len(argv):
+            print("Error: --checkpoint requires a directory path")
+            sys.exit(1)
+        checkpoint = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2:]
     positional = [a for a in argv if a not in flags]
     if len(positional) != 2:
         print(__doc__.strip())
@@ -245,4 +300,5 @@ if __name__ == "__main__":
         max_depth=int(max_depth),
         min_size=int(min_size),
         connectivity_ratio=float(connectivity_ratio),
+        checkpoint=checkpoint,
     )

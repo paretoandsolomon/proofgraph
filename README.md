@@ -106,10 +106,11 @@ proofgraph/
     spectral.py             # Laplacian, Fiedler vector, spectral embedding
     viz.py                  # Bipartition and multi-cluster visualization
     clusters.py             # Cluster analysis and recursive bisection
+    checkpoint.py           # Save/load intermediate results
   scripts/
     generate_figure.py      # Figure generation and analysis pipeline
     merge_extractions.py    # Multi-module extraction merger
-  tests/                    # Python test suite (114 tests)
+  tests/                    # Python test suite (125 tests)
   data/                     # Generated JSON artifacts (git-ignored)
   figures/                  # Generated visualizations (git-ignored)
   docs/                     # Documentation
@@ -145,6 +146,15 @@ docker compose run --build --rm python scripts/generate_figure.py \
   data/mathlib_full.json figures/ --streaming --light --recursive \
   --max-depth 4 --connectivity-ratio 50.0
 
+# Save intermediate results to skip recomputation on subsequent runs
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --streaming --light --checkpoint data/checkpoints
+
+# Rerun with different analysis parameters (reuses cached graph and spectral data)
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --checkpoint data/checkpoints \
+  --recursive --max-depth 3 --connectivity-ratio 50.0
+
 # Run tests
 docker compose run --build --rm python -m pytest tests/ -v
 
@@ -165,6 +175,7 @@ docker compose run --build --rm python scripts/merge_extractions.py \
 | `--max-depth N` | Maximum recursion depth for bisection (default 4). |
 | `--min-size N` | Minimum cluster size to continue bisecting (default 200). |
 | `--connectivity-ratio F` | Stop recursing when a subcluster's algebraic connectivity exceeds F times its parent's (default 10.0). Higher values allow deeper splitting. |
+| `--checkpoint DIR` | Save/load intermediate results (graph, spectral data) to skip expensive recomputation. Validated against source file size and modification time. |
 
 ### Output Files
 
