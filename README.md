@@ -154,16 +154,19 @@ docker compose run --build --rm python scripts/generate_figure.py \
   data/mathlib_full.json figures/ --streaming --light --recursive \
   --max-depth 4 --connectivity-ratio 50.0
 
-# Save intermediate results to skip recomputation on subsequent runs
+# Full recursive pipeline with checkpoint (recommended for large-scale analysis).
+# Saves graph, spectral data, and bisection tree for later reuse.
 docker compose run --build --rm python scripts/generate_figure.py \
-  data/mathlib_full.json figures/ --streaming --light --checkpoint data/checkpoints
+  data/mathlib_full.json figures/ --streaming --light --recursive \
+  --checkpoint data/checkpoints
 
-# Rerun with different analysis parameters (reuses cached graph and spectral data)
+# Rerun with different recursion parameters (reuses cached graph and spectral data)
 docker compose run --build --rm python scripts/generate_figure.py \
   data/mathlib_full.json figures/ --checkpoint data/checkpoints \
   --recursive --max-depth 3 --connectivity-ratio 50.0
 
-# Re-render all figures from checkpoint without re-bisecting (Option C)
+# Re-render all figures from checkpoint without re-bisecting (Option C).
+# Requires a prior run with --recursive --checkpoint to generate the tree.
 docker compose run --build --rm python scripts/generate_figure.py \
   data/mathlib_full.json figures/ --checkpoint data/checkpoints --rerender
 
@@ -245,7 +248,8 @@ family noted.
   (colors, annotation style, label thresholds) without re-running the
   expensive recursive bisection (~75 min at full Mathlib scale). The spectral
   re-embedding adds ~12 min for the largest subgraph; smaller subgraphs
-  complete in seconds.
+  complete in seconds. **Requires a prior run with `--recursive --checkpoint`**
+  to generate the bisection tree (`tree.pkl`).
 
 ## License
 
