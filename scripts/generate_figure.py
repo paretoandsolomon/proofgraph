@@ -1,12 +1,13 @@
-"""Generate the Fiedler bipartition figure from extraction JSON.
+"""Generate the Fiedler bipartition figure and cluster analysis from extraction JSON.
 
 Usage:
-    python scripts/generate_figure.py <json_path> <output_dir> [--streaming] [--light] [--profile]
+    python scripts/generate_figure.py <json_path> <output_dir> [--streaming] [--light] [--profile] [--top-n N]
 
 Flags:
     --streaming  Use ijson streaming parser (low memory, three-pass).
     --light      Drop heavy attributes (type expressions) from nodes.
     --profile    Report peak memory usage via tracemalloc.
+    --top-n N    Number of top modules per cluster in analysis (default 20).
 
 Example:
     python scripts/generate_figure.py data/nat_basic.json figures/
@@ -19,6 +20,12 @@ import sys
 import time
 from pathlib import Path
 
+from proofgraph.clusters import (
+    analyze_clusters,
+    assign_clusters,
+    print_cluster_summary,
+    write_cluster_outputs,
+)
 from proofgraph.loader import LIGHT_ATTRS, largest_connected_component, load_extraction
 from proofgraph.spectral import fiedler_vector, spectral_embedding
 from proofgraph.viz import plot_fiedler_bipartition
@@ -27,6 +34,7 @@ from proofgraph.viz import plot_fiedler_bipartition
 def main(
     json_path: str, output_dir: str,
     streaming: bool = False, light: bool = False, profile: bool = False,
+    top_n: int = 20,
 ) -> None:
     if profile:
         import tracemalloc
@@ -95,6 +103,20 @@ def main(
     )
     timings.append(("Plot figure", time.monotonic() - t_start))
 
+    # Cluster content analysis.
+    print("Analyzing cluster contents...")
+    t_start = time.monotonic()
+    assignments = assign_clusters(H, fiedler)
+    cluster_results = analyze_clusters(H, assignments, top_n=top_n)
+    total_decls = H.number_of_nodes()
+    md_path = write_cluster_outputs(cluster_results, output_dir_path, total_decls)
+    print_cluster_summary(cluster_results, total_decls, top_n=top_n)
+    timings.append(("Cluster analysis", time.monotonic() - t_start))
+    print(f"  Cluster report: {md_path}")
+    for label in sorted(cluster_results):
+        decl_file = output_dir_path / f"cluster_{label}_declarations.txt"
+        print(f"  Cluster {label} declarations: {decl_file}")
+
     total = time.monotonic() - t0
     timings.append(("Total", total))
 
@@ -115,13 +137,25 @@ def main(
 
 if __name__ == "__main__":
     flags = {"--profile", "--streaming", "--light"}
-    positional = [a for a in sys.argv[1:] if a not in flags]
+    # Parse --top-n <value> separately since it takes an argument.
+    argv = sys.argv[1:]
+    top_n = 20
+    if "--top-n" in argv:
+        idx = argv.index("--top-n")
+        if idx + 1 < len(argv):
+            top_n = int(argv[idx + 1])
+            argv = argv[:idx] + argv[idx + 2:]
+        else:
+            print("Error: --top-n requires a value")
+            sys.exit(1)
+    positional = [a for a in argv if a not in flags]
     if len(positional) != 2:
         print(__doc__.strip())
         sys.exit(1)
     main(
         positional[0], positional[1],
-        streaming="--streaming" in sys.argv,
-        light="--light" in sys.argv,
-        profile="--profile" in sys.argv,
+        streaming="--streaming" in argv,
+        light="--light" in argv,
+        profile="--profile" in argv,
+        top_n=top_n,
     )
