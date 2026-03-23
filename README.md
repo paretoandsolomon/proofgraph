@@ -34,11 +34,12 @@ Extracts declaration-level dependency graphs from Lean 4 projects with proof-the
 
 Spectral graph theory and visualization tools:
 
-- **Graph loading**: JSON to NetworkX, largest connected component extraction, attribute preservation
-- **Spectral analysis**: Graph Laplacian (combinatorial and normalized), Fiedler vector and algebraic connectivity, k-dimensional spectral embedding
-- **Visualization**: Fiedler bipartition plots with spectral embedding layout, log-scaled coordinates for dense clusters, degree-scaled node sizes for hub visibility, multi-cluster overlay maps
-- **Cluster analysis**: Per-cluster module breakdown, declaration kind breakdown, declaration listings; data-driven cluster labels (not hardcoded)
-- **Recursive spectral bisection**: Hierarchical graph partitioning with configurable stopping criteria (max depth, min cluster size, algebraic connectivity ratio); per-split figures and leaf-cluster overlay
+- **Graph loading**: JSON to NetworkX with streaming support (ijson for multi-GB files), largest connected component extraction, configurable attribute filtering (`--light` mode saves ~2 GB at 180K declarations)
+- **Spectral analysis**: Graph Laplacian (combinatorial and normalized), Fiedler vector and algebraic connectivity, k-dimensional spectral embedding via ARPACK
+- **Visualization**: Fiedler bipartition plots with spectral embedding layout, multi-cluster overlay maps with extended color palette, log-scaled coordinates for dense clusters, degree-scaled node sizes for hub visibility
+- **Cluster analysis**: Per-cluster module breakdown (at configurable path depth), declaration kind breakdown, declaration listings; data-driven cluster labels (not hardcoded)
+- **Recursive spectral bisection**: Hierarchical graph partitioning with configurable stopping criteria (max depth, min cluster size, algebraic connectivity ratio); per-split bipartition figures with independent spectral embeddings, and leaf-cluster overlay on the full graph
+- **Checkpointing**: Save/load the graph and spectral computation results to avoid recomputation on subsequent runs; checkpoint validation against source file fingerprint
 - **Multi-module merging**: Deduplicated merge of extraction JSONs across modules
 
 ### Analysis Methods (implemented)
@@ -123,7 +124,14 @@ proofgraph/
 ```bash
 cd ProofGraph
 lake build
-lake exe proofgraph-extract Mathlib.Data.Nat.Basic ../data/nat_basic.json
+lake exe proofgraph-extract Mathlib.Data.Nat.Basic --output ../data/nat_basic.json
+
+# Extract multiple modules at once
+lake exe proofgraph-extract Mathlib.Data.Nat.Basic Mathlib.Algebra.Group.Basic \
+  --output ../data/merged.json
+
+# Skip transitive axiom collection for faster extraction
+lake exe proofgraph-extract Mathlib --output ../data/mathlib_full.json --skip-transitive
 ```
 
 ### Python Analysis (via Docker)
@@ -181,14 +189,29 @@ docker compose run --build --rm python scripts/merge_extractions.py \
 
 The pipeline produces the following in the output directory:
 
+**Always generated:**
+
 | File | Description |
 |------|-------------|
 | `fiedler_bipartition.png` | Two-color spectral bipartition (teal/slate blue). |
 | `cluster_analysis.md` | Per-cluster module breakdown, kind breakdown, summary tables. |
 | `cluster_<N>_declarations.txt` | Full declaration listing per cluster, one name per line. |
+
+**With `--recursive`:**
+
+| File | Description |
+|------|-------------|
 | `recursive_clusters.png` | Full graph colored by leaf clusters from recursive bisection. |
-| `recursive_bisection.md` | Hierarchical report with spectral connectivity profile. |
+| `recursive_bisection.md` | Hierarchical report with spectral connectivity profile at every split. |
 | `bisections/bisection_<label>.png` | Per-split bipartition figure with its own spectral embedding. |
+
+**With `--checkpoint DIR`:**
+
+| File | Description |
+|------|-------------|
+| `<DIR>/graph.pkl` | Pickled NetworkX graph (largest connected component). |
+| `<DIR>/spectral.npz` | Fiedler vector, algebraic connectivity, and 2D spectral embedding. |
+| `<DIR>/metadata.json` | Source file fingerprint for cache validation. |
 
 ## License
 
