@@ -1,17 +1,24 @@
 """Generate the Fiedler bipartition figure and cluster analysis from extraction JSON.
 
 Usage:
-    python scripts/generate_figure.py <json_path> <output_dir> [--streaming] [--light] [--profile] [--top-n N]
+    python scripts/generate_figure.py <json_path> <output_dir> [flags]
 
 Flags:
-    --streaming  Use ijson streaming parser (low memory, three-pass).
-    --light      Drop heavy attributes (type expressions) from nodes.
-    --profile    Report peak memory usage via tracemalloc.
-    --top-n N    Number of top modules per cluster in analysis (default 20).
+    --streaming      Use ijson streaming parser (low memory, three-pass).
+    --light          Drop heavy attributes (type expressions) from nodes.
+    --profile        Report peak memory usage via tracemalloc.
+    --top-n N        Number of top modules per cluster in analysis (default 20).
+    --recursive      Run recursive spectral bisection after initial analysis.
+    --max-depth N    Maximum recursion depth for bisection (default 4).
+    --min-size N     Minimum cluster size to continue bisecting (default 200).
+    --connectivity-ratio F  Stop recursing when a subcluster's algebraic
+                     connectivity exceeds F times its parent's (default 10.0).
+                     Higher values allow deeper splitting into well-connected regions.
 
 Example:
     python scripts/generate_figure.py data/nat_basic.json figures/
     python scripts/generate_figure.py data/large.json figures/ --streaming --light --profile
+    python scripts/generate_figure.py data/large.json figures/ --recursive --max-depth 3
 """
 
 from __future__ import annotations
@@ -23,9 +30,14 @@ from pathlib import Path
 from proofgraph.clusters import (
     analyze_clusters,
     assign_clusters,
+    collect_connectivity_profile,
+    collect_leaf_assignments,
     print_cluster_summary,
+    recursive_bisect,
     write_cluster_outputs,
+    write_recursive_outputs,
 )
+from proofgraph.viz import plot_cluster_map
 from proofgraph.loader import LIGHT_ATTRS, largest_connected_component, load_extraction
 from proofgraph.spectral import fiedler_vector, spectral_embedding
 from proofgraph.viz import plot_fiedler_bipartition
@@ -35,6 +47,8 @@ def main(
     json_path: str, output_dir: str,
     streaming: bool = False, light: bool = False, profile: bool = False,
     top_n: int = 20,
+    recursive: bool = False, max_depth: int = 4, min_size: int = 200,
+    connectivity_ratio: float = 10.0,
 ) -> None:
     if profile:
         import tracemalloc
@@ -117,6 +131,69 @@ def main(
         decl_file = output_dir_path / f"cluster_{label}_declarations.txt"
         print(f"  Cluster {label} declarations: {decl_file}")
 
+    # Recursive spectral bisection.
+    if recursive:
+        bisection_dir = output_dir_path / "bisections"
+        print(
+            f"\nStarting recursive bisection "
+            f"(max_depth={max_depth}, min_size={min_size}, connectivity_ratio={connectivity_ratio})..."
+        )
+        t_start = time.monotonic()
+        tree = recursive_bisect(
+            H,
+            max_depth=max_depth,
+            min_size=min_size,
+            connectivity_ratio=connectivity_ratio,
+            top_n=top_n,
+            normalized=True,
+            precomputed_fiedler=(fiedler, algebraic_connectivity),
+            plot_dir=bisection_dir,
+            precomputed_coords=coords,
+        )
+        timings.append(("Recursive bisection", time.monotonic() - t_start))
+
+        # Generate leaf-cluster overlay on the full graph.
+        print("Generating leaf-cluster overlay figure...")
+        t_start = time.monotonic()
+        leaf_assignments = collect_leaf_assignments(tree)
+        # Convert string labels to sequential integers for coloring.
+        unique_labels = sorted(set(leaf_assignments.values()))
+        label_to_int = {lbl: i for i, lbl in enumerate(unique_labels)}
+        int_assignments = {n: label_to_int[lbl] for n, lbl in leaf_assignments.items()}
+        n_leaves = len(unique_labels)
+        overlay_title = (
+            f"Recursive Bisection: {stem} "
+            f"({H.number_of_nodes()} declarations, {n_leaves} leaf clusters)"
+        )
+        overlay_caption = (
+            f"Colors indicate {n_leaves} leaf clusters from recursive spectral bisection "
+            f"(max depth {max_depth}).\n"
+            "Node positions are the same spectral embedding as the bipartition figure."
+        )
+        plot_cluster_map(
+            H, int_assignments,
+            output_dir_path / "recursive_clusters.png",
+            coords=coords,
+            title=overlay_title,
+            caption=overlay_caption,
+        )
+        timings.append(("Overlay figure", time.monotonic() - t_start))
+
+        # Write outputs.
+        rb_path = write_recursive_outputs(tree, output_dir_path)
+        print(f"  Recursive report: {rb_path}")
+
+        # Print connectivity profile.
+        profile = collect_connectivity_profile(tree)
+        print("\n--- Spectral Connectivity Profile ---")
+        print(f"  {'Label':<20s} {'Depth':>5s} {'Nodes':>10s} {'Alg. Conn.':>12s}  Status")
+        for r in profile:
+            ac_str = f"{r['algebraic_connectivity']:.6f}" if r["algebraic_connectivity"] is not None else "n/a"
+            status = r["stopped_reason"] or "split"
+            print(f"  {r['label']:<20s} {r['depth']:>5d} {r['node_count']:>10,} {ac_str:>12s}  {status}")
+        print(f"\n  Leaf-cluster overlay: {output_dir_path / 'recursive_clusters.png'}")
+        print(f"  Per-split figures: {bisection_dir}/")
+
     total = time.monotonic() - t0
     timings.append(("Total", total))
 
@@ -135,19 +212,25 @@ def main(
     print("\nDone.")
 
 
+def _parse_flag(argv: list[str], flag: str, default: float, cast: type = int) -> tuple[list[str], float]:
+    """Extract a --flag VALUE pair from argv, returning (remaining_argv, value)."""
+    if flag not in argv:
+        return argv, default
+    idx = argv.index(flag)
+    if idx + 1 >= len(argv):
+        print(f"Error: {flag} requires a value")
+        sys.exit(1)
+    value = cast(argv[idx + 1])
+    return argv[:idx] + argv[idx + 2:], value
+
+
 if __name__ == "__main__":
-    flags = {"--profile", "--streaming", "--light"}
-    # Parse --top-n <value> separately since it takes an argument.
+    flags = {"--profile", "--streaming", "--light", "--recursive"}
     argv = sys.argv[1:]
-    top_n = 20
-    if "--top-n" in argv:
-        idx = argv.index("--top-n")
-        if idx + 1 < len(argv):
-            top_n = int(argv[idx + 1])
-            argv = argv[:idx] + argv[idx + 2:]
-        else:
-            print("Error: --top-n requires a value")
-            sys.exit(1)
+    argv, top_n = _parse_flag(argv, "--top-n", 20, int)
+    argv, max_depth = _parse_flag(argv, "--max-depth", 4, int)
+    argv, min_size = _parse_flag(argv, "--min-size", 200, int)
+    argv, connectivity_ratio = _parse_flag(argv, "--connectivity-ratio", 10.0, float)
     positional = [a for a in argv if a not in flags]
     if len(positional) != 2:
         print(__doc__.strip())
@@ -157,5 +240,9 @@ if __name__ == "__main__":
         streaming="--streaming" in argv,
         light="--light" in argv,
         profile="--profile" in argv,
-        top_n=top_n,
+        top_n=int(top_n),
+        recursive="--recursive" in argv,
+        max_depth=int(max_depth),
+        min_size=int(min_size),
+        connectivity_ratio=float(connectivity_ratio),
     )

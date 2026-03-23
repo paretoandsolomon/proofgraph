@@ -27,7 +27,8 @@ Extracts declaration-level dependency graphs from Lean 4 projects with proof-the
 - Transitive axiom collection: identifies Classical.choice, propext, Quot.sound usage
 - Constructive status derivation, noncomputability detection
 - JSON output with metadata block (module list, extraction date, declaration/edge counts)
-- Tested at scale: 7,000+ declarations across 5 Mathlib modules
+- Streaming JSON writer for large graphs (50K+ declarations without stack overflow)
+- Tested at scale: 316K+ declarations (full Mathlib)
 
 ### Python Analysis Package
 
@@ -35,7 +36,9 @@ Spectral graph theory and visualization tools:
 
 - **Graph loading**: JSON to NetworkX, largest connected component extraction, attribute preservation
 - **Spectral analysis**: Graph Laplacian (combinatorial and normalized), Fiedler vector and algebraic connectivity, k-dimensional spectral embedding
-- **Visualization**: Fiedler bipartition plots with spectral embedding layout, log-scaled coordinates for dense clusters, degree-scaled node sizes for hub visibility
+- **Visualization**: Fiedler bipartition plots with spectral embedding layout, log-scaled coordinates for dense clusters, degree-scaled node sizes for hub visibility, multi-cluster overlay maps
+- **Cluster analysis**: Per-cluster module breakdown, declaration kind breakdown, declaration listings; data-driven cluster labels (not hardcoded)
+- **Recursive spectral bisection**: Hierarchical graph partitioning with configurable stopping criteria (max depth, min cluster size, algebraic connectivity ratio); per-split figures and leaf-cluster overlay
 - **Multi-module merging**: Deduplicated merge of extraction JSONs across modules
 
 ### Analysis Methods (implemented)
@@ -44,6 +47,8 @@ Spectral graph theory and visualization tools:
 - Algebraic connectivity measurement
 - Spectral embedding (principled, non-force-directed node positioning)
 - Normalized Laplacian for degree-heterogeneous graphs
+- Recursive spectral bisection with spectral connectivity profiling
+- Cluster content analysis (module distribution, declaration kinds)
 
 ## Coming Soon
 
@@ -52,7 +57,6 @@ Spectral graph theory and visualization tools:
 - Community detection (Louvain, label propagation)
 - Degree distribution analysis, PageRank, betweenness centrality
 - Structural holes (Burt), core-periphery decomposition (Newman)
-- Hierarchical spectral bisection
 - Heat kernel diffusion (continuous taint analysis)
 - Persistent homology (TDA)
 - Temporal evolution across Mathlib commits
@@ -100,11 +104,12 @@ proofgraph/
   src/proofgraph/           # Python analysis package
     loader.py               # JSON to NetworkX graph
     spectral.py             # Laplacian, Fiedler vector, spectral embedding
-    viz.py                  # Fiedler bipartition visualization
+    viz.py                  # Bipartition and multi-cluster visualization
+    clusters.py             # Cluster analysis and recursive bisection
   scripts/
-    generate_figure.py      # Figure generation script
+    generate_figure.py      # Figure generation and analysis pipeline
     merge_extractions.py    # Multi-module extraction merger
-  tests/                    # Python test suite (54 tests)
+  tests/                    # Python test suite (114 tests)
   data/                     # Generated JSON artifacts (git-ignored)
   figures/                  # Generated visualizations (git-ignored)
   docs/                     # Documentation
@@ -123,8 +128,22 @@ lake exe proofgraph-extract Mathlib.Data.Nat.Basic ../data/nat_basic.json
 ### Python Analysis (via Docker)
 
 ```bash
-# Generate a spectral bipartition figure
-docker compose run --build --rm python scripts/generate_figure.py data/nat_basic.json
+# Generate a spectral bipartition figure with cluster analysis
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/nat_basic.json figures/
+
+# Large-scale analysis (streaming loader, light attributes, memory profiling)
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --streaming --light --profile
+
+# Recursive spectral bisection with per-split figures
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --streaming --light --recursive --max-depth 4
+
+# Allow deeper splitting into well-connected regions
+docker compose run --build --rm python scripts/generate_figure.py \
+  data/mathlib_full.json figures/ --streaming --light --recursive \
+  --max-depth 4 --connectivity-ratio 50.0
 
 # Run tests
 docker compose run --build --rm python -m pytest tests/ -v
@@ -133,6 +152,32 @@ docker compose run --build --rm python -m pytest tests/ -v
 docker compose run --build --rm python scripts/merge_extractions.py \
   data/nat_basic.json data/algebra_group_basic.json -o data/merged.json
 ```
+
+### Pipeline Flags
+
+| Flag | Description |
+|------|-------------|
+| `--streaming` | Use ijson streaming parser (low memory, three-pass). Required for multi-GB files. |
+| `--light` | Drop heavy attributes (type expressions) to reduce memory by ~2 GB at 180K declarations. |
+| `--profile` | Report peak memory usage via tracemalloc. |
+| `--top-n N` | Number of top modules per cluster in analysis tables (default 20). |
+| `--recursive` | Run recursive spectral bisection after initial analysis. |
+| `--max-depth N` | Maximum recursion depth for bisection (default 4). |
+| `--min-size N` | Minimum cluster size to continue bisecting (default 200). |
+| `--connectivity-ratio F` | Stop recursing when a subcluster's algebraic connectivity exceeds F times its parent's (default 10.0). Higher values allow deeper splitting. |
+
+### Output Files
+
+The pipeline produces the following in the output directory:
+
+| File | Description |
+|------|-------------|
+| `fiedler_bipartition.png` | Two-color spectral bipartition (teal/slate blue). |
+| `cluster_analysis.md` | Per-cluster module breakdown, kind breakdown, summary tables. |
+| `cluster_<N>_declarations.txt` | Full declaration listing per cluster, one name per line. |
+| `recursive_clusters.png` | Full graph colored by leaf clusters from recursive bisection. |
+| `recursive_bisection.md` | Hierarchical report with spectral connectivity profile. |
+| `bisections/bisection_<label>.png` | Per-split bipartition figure with its own spectral embedding. |
 
 ## License
 

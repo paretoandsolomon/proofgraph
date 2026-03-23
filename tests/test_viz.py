@@ -7,7 +7,14 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 
-from proofgraph.viz import SLATE_BLUE, TEAL, plot_fiedler_bipartition
+from proofgraph.viz import (
+    CLUSTER_PALETTE,
+    SLATE_BLUE,
+    TEAL,
+    cluster_color,
+    plot_cluster_map,
+    plot_fiedler_bipartition,
+)
 
 
 def _small_graph_with_fiedler() -> tuple[nx.Graph, np.ndarray]:
@@ -76,9 +83,62 @@ class TestPlotFiedlerBipartition:
         assert out.exists()
 
 
+class TestPlotClusterMap:
+    def test_creates_file(self, tmp_path: Path) -> None:
+        G = nx.path_graph(6)
+        assignments = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2}
+        coords = np.column_stack([np.arange(6, dtype=float), np.zeros(6)])
+        out = tmp_path / "clusters.png"
+        plot_cluster_map(G, assignments, out, coords=coords)
+        assert out.exists()
+
+    def test_many_clusters(self, tmp_path: Path) -> None:
+        G = nx.path_graph(20)
+        assignments = {i: i for i in range(20)}
+        coords = np.column_stack([np.arange(20, dtype=float), np.zeros(20)])
+        out = tmp_path / "many.png"
+        plot_cluster_map(G, assignments, out, coords=coords)
+        assert out.exists()
+
+    def test_with_title_and_caption(self, tmp_path: Path) -> None:
+        G = nx.path_graph(4)
+        assignments = {0: 0, 1: 0, 2: 1, 3: 1}
+        coords = np.column_stack([np.arange(4, dtype=float), np.zeros(4)])
+        out = tmp_path / "titled.png"
+        plot_cluster_map(
+            G, assignments, out, coords=coords,
+            title="Test", caption="A caption",
+        )
+        assert out.exists()
+
+    def test_without_coords(self, tmp_path: Path) -> None:
+        G = nx.path_graph(4)
+        assignments = {0: 0, 1: 0, 2: 1, 3: 1}
+        out = tmp_path / "no_coords.png"
+        plot_cluster_map(G, assignments, out)
+        assert out.exists()
+
+
+class TestClusterColor:
+    def test_returns_hex(self) -> None:
+        c = cluster_color(0, 4)
+        assert c.startswith("#")
+
+    def test_palette_colors_distinct(self) -> None:
+        colors = [cluster_color(i, 8) for i in range(8)]
+        assert len(set(colors)) == 8
+
+    def test_fallback_for_many_clusters(self) -> None:
+        c = cluster_color(15, 20)
+        assert c.startswith("#")
+
+
 class TestColorConstants:
     def test_teal_is_hex(self) -> None:
         assert TEAL.startswith("#") and len(TEAL) == 7
 
     def test_slate_blue_is_hex(self) -> None:
         assert SLATE_BLUE.startswith("#") and len(SLATE_BLUE) == 7
+
+    def test_palette_has_at_least_12(self) -> None:
+        assert len(CLUSTER_PALETTE) >= 12

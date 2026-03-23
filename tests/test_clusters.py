@@ -11,9 +11,14 @@ import pytest
 from proofgraph.clusters import (
     analyze_clusters,
     assign_clusters,
+    collect_connectivity_profile,
+    collect_leaf_assignments,
     format_cluster_markdown,
+    format_recursive_markdown,
     print_cluster_summary,
+    recursive_bisect,
     write_cluster_outputs,
+    write_recursive_outputs,
 )
 
 
@@ -229,3 +234,235 @@ class TestPrintClusterSummary:
         assert "Cluster Analysis" in captured.out
         assert "Cluster 0" in captured.out
         assert "Cluster 1" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Recursive bisection tests
+# ---------------------------------------------------------------------------
+
+
+def _barbell_graph() -> nx.Graph:
+    """A barbell graph with clear bisection structure and node attributes."""
+    G = nx.barbell_graph(10, 1)
+    for n in G.nodes():
+        module = "Mathlib.Left" if n < 10 else "Mathlib.Right"
+        kind = "thm" if n % 2 == 0 else "def"
+        G.nodes[n]["module"] = module
+        G.nodes[n]["kind"] = kind
+    return G
+
+
+class TestRecursiveBisect:
+    def test_returns_tree_structure(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        assert "label" in tree
+        assert "children" in tree
+        assert "algebraic_connectivity" in tree
+        assert "node_count" in tree
+
+    def test_root_label(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        assert tree["label"] == "root"
+        assert tree["depth"] == 0
+
+    def test_stops_at_max_depth(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        # Children exist at depth 1, but they should not recurse further.
+        for child in tree["children"]:
+            assert child["stopped_reason"] == "max_depth"
+            assert child["children"] == []
+
+    def test_stops_at_min_size(self) -> None:
+        G = nx.path_graph(5)
+        tree = recursive_bisect(G, max_depth=10, min_size=100)
+        # Root itself is too small to split (5 < 100 at depth>0),
+        # but root always tries. After first split, children are < 100.
+        for child in tree["children"]:
+            assert child["stopped_reason"] == "min_size"
+
+    def test_children_node_counts_sum(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        if tree["children"]:
+            child_total = sum(c["node_count"] for c in tree["children"])
+            assert child_total == tree["node_count"]
+
+    def test_algebraic_connectivity_recorded(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        assert tree["algebraic_connectivity"] is not None
+        assert tree["algebraic_connectivity"] > 0
+
+    def test_precomputed_fiedler(self) -> None:
+        G = _barbell_graph()
+        from proofgraph.spectral import fiedler_vector
+        f, ac = fiedler_vector(G, normalized=True)
+        tree = recursive_bisect(
+            G, max_depth=1, min_size=3,
+            precomputed_fiedler=(f, ac),
+        )
+        assert tree["algebraic_connectivity"] == ac
+        assert len(tree["children"]) == 2
+
+    def test_depth_2_produces_grandchildren(self) -> None:
+        # Chain of barbells: four cliques connected in a line, giving
+        # hierarchical bisection structure.
+        G = nx.Graph()
+        cliques = [range(i * 10, (i + 1) * 10) for i in range(4)]
+        for clique in cliques:
+            for u in clique:
+                for v in clique:
+                    if u < v:
+                        G.add_edge(u, v)
+                G.nodes[u]["kind"] = "thm"
+        # Connect adjacent cliques with a single bridge edge.
+        for i in range(3):
+            G.add_edge(cliques[i][-1], cliques[i + 1][0])
+        tree = recursive_bisect(G, max_depth=2, min_size=3, connectivity_ratio=100.0)
+        has_grandchildren = any(
+            len(child["children"]) > 0 for child in tree["children"]
+        )
+        assert has_grandchildren
+
+    def test_child_labels_are_hierarchical(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        child_labels = {c["label"] for c in tree["children"]}
+        assert child_labels == {"0", "1"}
+
+    def test_elapsed_seconds_populated(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        assert tree["elapsed_seconds"] > 0
+
+    def test_tiny_graph_stops_immediately(self) -> None:
+        G = nx.path_graph(2)
+        tree = recursive_bisect(G, max_depth=4, min_size=3)
+        assert tree["stopped_reason"] == "min_size"
+        assert tree["children"] == []
+
+
+class TestCollectConnectivityProfile:
+    def test_returns_all_nodes(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        profile = collect_connectivity_profile(tree)
+        # root + 2 children = 3 entries.
+        assert len(profile) == 3
+
+    def test_sorted_by_depth_then_label(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        profile = collect_connectivity_profile(tree)
+        depths = [r["depth"] for r in profile]
+        assert depths == sorted(depths)
+
+    def test_root_is_first(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        profile = collect_connectivity_profile(tree)
+        assert profile[0]["label"] == "root"
+
+
+class TestFormatRecursiveMarkdown:
+    def test_contains_header(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        md = format_recursive_markdown(tree)
+        assert "# Recursive Spectral Bisection" in md
+
+    def test_contains_connectivity_profile(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        md = format_recursive_markdown(tree)
+        assert "Spectral Connectivity Profile" in md
+        assert "Algebraic Connectivity" in md
+
+    def test_contains_node_details(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        md = format_recursive_markdown(tree)
+        assert "root" in md
+        assert "nodes" in md
+
+
+class TestWriteRecursiveOutputs:
+    def test_creates_markdown(self, tmp_path: Path) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        md_path = write_recursive_outputs(tree, tmp_path)
+        assert md_path.exists()
+        assert md_path.name == "recursive_bisection.md"
+
+    def test_creates_declaration_files(self, tmp_path: Path) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        write_recursive_outputs(tree, tmp_path)
+        assert (tmp_path / "cluster_0_declarations.txt").exists()
+        assert (tmp_path / "cluster_1_declarations.txt").exists()
+
+    def test_hierarchical_declaration_files(self, tmp_path: Path) -> None:
+        # Chain of four cliques for hierarchical structure.
+        G = nx.Graph()
+        cliques = [range(i * 10, (i + 1) * 10) for i in range(4)]
+        for clique in cliques:
+            for u in clique:
+                for v in clique:
+                    if u < v:
+                        G.add_edge(u, v)
+                G.nodes[u]["kind"] = "thm"
+        for i in range(3):
+            G.add_edge(cliques[i][-1], cliques[i + 1][0])
+        tree = recursive_bisect(G, max_depth=2, min_size=3, connectivity_ratio=100.0)
+        write_recursive_outputs(tree, tmp_path)
+        # Root-level files should exist.
+        assert (tmp_path / "cluster_0_declarations.txt").exists()
+        assert (tmp_path / "cluster_1_declarations.txt").exists()
+
+
+class TestCollectLeafAssignments:
+    def test_depth_1_assigns_all_nodes(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        leaf = collect_leaf_assignments(tree)
+        assert len(leaf) == G.number_of_nodes()
+
+    def test_depth_1_uses_child_labels(self) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3)
+        leaf = collect_leaf_assignments(tree)
+        labels = set(leaf.values())
+        assert labels == {"0", "1"}
+
+    def test_depth_2_uses_deeper_labels(self) -> None:
+        # Chain of four cliques for hierarchical structure.
+        G = nx.Graph()
+        cliques = [range(i * 10, (i + 1) * 10) for i in range(4)]
+        for clique in cliques:
+            for u in clique:
+                for v in clique:
+                    if u < v:
+                        G.add_edge(u, v)
+                G.nodes[u]["kind"] = "thm"
+        for i in range(3):
+            G.add_edge(cliques[i][-1], cliques[i + 1][0])
+        tree = recursive_bisect(G, max_depth=2, min_size=3, connectivity_ratio=100.0)
+        leaf = collect_leaf_assignments(tree)
+        assert len(leaf) == G.number_of_nodes()
+        # Should have labels deeper than just "0"/"1".
+        labels = set(leaf.values())
+        assert len(labels) > 2
+
+    def test_unsplit_tree_returns_empty(self) -> None:
+        G = nx.path_graph(2)
+        tree = recursive_bisect(G, max_depth=4, min_size=3)
+        leaf = collect_leaf_assignments(tree)
+        assert leaf == {}
+
+    def test_generates_per_split_figures(self, tmp_path: Path) -> None:
+        G = _barbell_graph()
+        tree = recursive_bisect(G, max_depth=1, min_size=3, plot_dir=tmp_path)
+        assert (tmp_path / "bisection_root.png").exists()
