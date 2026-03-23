@@ -107,6 +107,44 @@ class TestValidateCheckpoint:
         (ckpt / "metadata.json").write_text("not json")
         assert not validate_checkpoint(source, ckpt, True)
 
+    def test_valid_with_different_directory(self, tmp_path: Path) -> None:
+        """Checkpoint created from one directory should validate from another
+        (Docker scenario: /app/data/x.json vs ./data/x.json)."""
+        # Create source file and checkpoint from one path.
+        dir_a = tmp_path / "dir_a"
+        dir_a.mkdir()
+        source_a = dir_a / "source.json"
+        source_a.write_text('{"declarations": [], "edges": []}')
+        save_metadata(source_a, tmp_path / "ckpt", 10, 20, True)
+
+        # Create an identical file at a different path.
+        dir_b = tmp_path / "dir_b"
+        dir_b.mkdir()
+        source_b = dir_b / "source.json"
+        source_b.write_text('{"declarations": [], "edges": []}')
+
+        # Should validate because filename and size match.
+        assert validate_checkpoint(source_b, tmp_path / "ckpt", True)
+
+    def test_valid_with_old_path_key(self, tmp_path: Path) -> None:
+        """Backward compatibility: checkpoints with 'path' key (no 'filename')."""
+        source = _write_source_json(tmp_path)
+        ckpt = tmp_path / "ckpt"
+        ckpt.mkdir()
+        stat = source.stat()
+        meta = {
+            "source": {
+                "path": str(source.resolve()),
+                "size_bytes": stat.st_size,
+                "mtime": stat.st_mtime,
+            },
+            "node_count": 10,
+            "edge_count": 20,
+            "light": True,
+        }
+        (ckpt / "metadata.json").write_text(json.dumps(meta))
+        assert validate_checkpoint(source, ckpt, True)
+
 
 class TestSaveLoadTree:
     def test_roundtrip(self, tmp_path: Path) -> None:

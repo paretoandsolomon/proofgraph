@@ -13,11 +13,16 @@ import numpy as np
 
 
 def _source_fingerprint(json_path: str | Path) -> dict:
-    """Compute a fingerprint for the source JSON file."""
+    """Compute a fingerprint for the source JSON file.
+
+    Uses the filename (not full path) for comparison so that checkpoints
+    created inside Docker (where the path is /app/data/...) can be reused
+    on the host (where the path is ./data/...) and vice versa.
+    """
     p = Path(json_path)
     stat = p.stat()
     return {
-        "path": str(p.resolve()),
+        "filename": p.name,
         "size_bytes": stat.st_size,
         "mtime": stat.st_mtime,
     }
@@ -124,20 +129,35 @@ def validate_checkpoint(
             meta = json.load(f)
         current = _source_fingerprint(json_path)
         stored = meta["source"]
-        if current["path"] != stored["path"]:
-            print(f"  Checkpoint source mismatch: {stored['path']} != {current['path']}")
+
+        # Compare by filename (not full path) for Docker compatibility.
+        # Fall back to "path" key for checkpoints created before this change.
+        stored_name = stored.get("filename") or Path(stored.get("path", "")).name
+        if current["filename"] != stored_name:
+            print(
+                f"  Checkpoint source mismatch: "
+                f"expected '{current['filename']}', got '{stored_name}'"
+            )
             return False
         if current["size_bytes"] != stored["size_bytes"]:
-            print(f"  Checkpoint stale: source file size changed")
+            print(
+                f"  Checkpoint stale: source file size changed "
+                f"({stored['size_bytes']} -> {current['size_bytes']})"
+            )
             return False
-        if current["mtime"] != stored["mtime"]:
-            print(f"  Checkpoint stale: source file modified")
-            return False
+        # Skip mtime check if the file sizes match. The mtime changes
+        # every time Docker mounts the volume, even if the file content
+        # is identical. File size is a sufficient staleness signal.
         if meta.get("light") != light:
-            print(f"  Checkpoint stale: light mode changed")
+            print(
+                f"  Checkpoint stale: light mode changed "
+                f"(checkpoint={'light' if meta.get('light') else 'full'}, "
+                f"requested={'light' if light else 'full'})"
+            )
             return False
         return True
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"  Checkpoint metadata unreadable: {e}")
         return False
 
 

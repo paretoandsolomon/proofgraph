@@ -274,6 +274,20 @@ def main(
             print("Error: --rerender requires --checkpoint <dir>")
             sys.exit(1)
 
+        # Check for tree first, before doing any expensive loading.
+        tree_path = Path(checkpoint) / "tree.pkl"
+        if not tree_path.exists():
+            print(
+                f"Error: no bisection tree found at {tree_path}\n"
+                f"\n"
+                f"The --rerender flag requires a previously saved bisection tree.\n"
+                f"Run with --recursive --checkpoint first:\n"
+                f"\n"
+                f"  python scripts/generate_figure.py {json_path} {output_dir} \\\n"
+                f"    --recursive --checkpoint {checkpoint} --streaming --light"
+            )
+            sys.exit(1)
+
         # Load graph.
         H = _load_or_compute_graph(
             json_path, checkpoint, checkpoint_valid,
